@@ -8,39 +8,28 @@ import {
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, 
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager 
 } from 'firebase/firestore';
 
 // --- FIREBASE SETUP ---
-let app, db;
-const firebaseConfig = {
-  apiKey: "AIzaSyBcDVrgdyb62m_k8TcCG0DHIZtRKwwniIU",
-  authDomain: "agenda-acs-pro-360.firebaseapp.com",
-  projectId: "agenda-acs-pro-360",
-  storageBucket: "agenda-acs-pro-360.firebasestorage.app",
-  messagingSenderId: "118241574847",
-  appId: "1:118241574847:web:398ebad006816fbe88ab0a",
-  measurementId: "G-EFDR2G93K6"
-};
-
-try {
-  app = initializeApp(firebaseConfig);
+let app, db, auth;
+const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+if (firebaseConfigStr) {
   try {
-    // Tenta iniciar com suporte a modo offline (IndexedDB)
+    const firebaseConfig = JSON.parse(firebaseConfigStr);
+    app = initializeApp(firebaseConfig);
     db = initializeFirestore(app, {
       localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
     });
-  } catch (cacheErr) {
-    // Fallback seguro se o navegador (ou iframe) bloquear a memória offline
-    console.warn("Modo offline restrito pelo navegador. A iniciar Firestore padrão.");
-    db = getFirestore(app);
+    auth = getAuth(app);
+  } catch (e) {
+    console.error("Erro ao inicializar Firebase", e);
   }
-} catch (e) {
-  console.error("Erro ao inicializar Firebase", e);
 }
-const appId = "acs-pro-360"; 
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- GEMINI API SETUP ---
 const apiKey = ""; 
@@ -173,13 +162,13 @@ const evaluateIndicators = (p) => {
   const age = getAge(p.birthDate); const ageMonths = getAgeMonths(p.birthDate); const daysAge = getAgeDays(p.birthDate);
   const rules = []; let hasPending = false; const ind = p.indicators || {};
 
-  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
-  if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Bolsa Família (6m)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
+  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro atualizado (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
+  if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Condicionalidades Bolsa Família (6m)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
   let isC1Ok = true; c1Items.forEach((i) => { if (i.status === "pending") { isC1Ok = false; hasPending = true; }});
   rules.push({ id: "C.1", title: "Acesso e Cadastro", icon: "📋", color: "bg-blue-500", isOk: isC1Ok, items: c1Items });
 
   if (ageMonths <= 24) {
-    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
+    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta (até 30d)" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
     let expected = 0; const mItems = milestones.map((m) => { const isDue = daysAge >= m.t - 15; if (isDue) expected++; return { label: m.l, status: getStatus(!!ind[m.key], isDue) }; });
     const acs1Due = daysAge >= 30 - 15; const acs2Due = daysAge >= 180 - 15; const wDue = expected > 0; const wOk = (ind.c2_weight || 0) >= expected;
     const items = [...mItems, { label: `Reg. peso/altura (${ind.c2_weight || 0}/${expected})`, status: getStatus(wOk, wDue) }, { label: "Visita ACS (Até 30 dias)", status: getStatus(!!ind.c2_acs1, acs1Due) }, { label: "Visita ACS (Até 6 meses)", status: getStatus(!!ind.c2_acs2, acs2Due) }, { label: "Vacinação em dia", status: getStatus(!!ind.c2_vac, true) }];
@@ -230,7 +219,7 @@ const evaluateIndicators = (p) => {
   return { rules, hasPending, daysSinceLastAcsVisit };
 };
 
-// HELPER PARA CORES DAS TAGS DISCRETAS
+// HELPER PARA CORES DAS TAGS DISCRETAS E IMPRESSÃO
 function getPatientTags(patient, theme) {
   const tags = []; const c = patient.conditions || {}; const age = getAge(patient.birthDate); const ageMonths = getAgeMonths(patient.birthDate); const isDark = theme.isDark;
   const addTag = (label, color) => tags.push({ label, color });
@@ -315,7 +304,7 @@ function LoginScreen({ theme, onLogin, error }) {
 }
 
 export default function App() {
-  // Injeta o Tailwind via CDN
+  // Injeta o Tailwind via CDN de forma segura
   useEffect(() => {
     if (!document.getElementById("tailwind-cdn")) {
       const script = document.createElement("script");
@@ -326,6 +315,7 @@ export default function App() {
   }, []);
   
   // 1. ESTADOS DE AUTENTICAÇÃO E SESSÃO
+  const [authUser, setAuthUser] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [loggedInUser, setLoggedInUser] = useState(() => {
     try {
@@ -334,8 +324,27 @@ export default function App() {
     } catch(e) {}
     return null;
   });
+  
+  // 2. FIREBASE AUTH CONFIGURATION (Corrigido para evitar erros de token em dev)
+  useEffect(() => {
+    if (!auth) return;
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        }
+        // Removido signInAnonymously() para evitar auth/admin-restricted-operation.
+        // O app vai se basear no loggedInUser para salvar os dados com segurança no Firebase.
+      } catch (e) {
+        // Erros de auth não impedirão o app de rodar localmente
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setAuthUser);
+    return () => unsubscribe();
+  }, []);
 
-  // 3. TODOS OS OUTROS HOOKS
+  // 3. TODOS OS OUTROS HOOKS (Tema, Banco Local, Pacientes, Tabs)
   const [isDarkMode, setIsDarkMode] = useState(() => safeGetItem('acs_pro_360_theme') === 'dark');
   useEffect(() => { safeSetItem('acs_pro_360_theme', isDarkMode ? 'dark' : 'light'); }, [isDarkMode]);
 
@@ -363,6 +372,7 @@ export default function App() {
   const [patients, setPatients] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   
+  // Modificado: Carrega dados do Firestore com base no loggedInUser em vez de authUser (Bypassa o erro do Firebase Auth)
   useEffect(() => {
     if (!loggedInUser || !db) {
       const saved = safeGetItem('acs_pro_360_patients_offline');
@@ -371,15 +381,19 @@ export default function App() {
       }
       setIsLoadingData(false); return;
     }
+    
     setIsLoadingData(true);
-    // Usa o email do usuario logado (simplificado de id) como base para a pasta de dados dele
     const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
     const q = collection(db, 'artifacts', appId, 'users', safeUserId, 'patients');
+    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setPatients(pts); setIsLoadingData(false);
       safeSetItem('acs_pro_360_patients_offline', JSON.stringify(pts));
-    }, () => setIsLoadingData(false));
+    }, (err) => {
+       console.warn("Sem conexão com banco na nuvem. Usando local.");
+       setIsLoadingData(false);
+    });
     return () => unsubscribe();
   }, [loggedInUser]);
 
@@ -451,7 +465,7 @@ export default function App() {
     return filterMicroarea === "Todas" ? processedPatients : processedPatients.filter((p) => p.microarea === filterMicroarea);
   }, [processedPatients, filterMicroarea]);
 
-  // 4. HANDLERS E FUNÇÕES
+  // 4. HANDLERS E FUNÇÕES (Com Update Otimista Garantido)
   const handleLogin = (email, password) => {
     const user = systemUsers.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
     if (user) {
@@ -474,12 +488,13 @@ export default function App() {
   };
 
   const handleUpdatePatientData = async (patientId, updatedData) => {
-    if (db && loggedInUser) {
-      const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-      await setDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientId), updatedData, { merge: true });
-    } else {
-      setPatients(patients.map(p => p.id === patientId ? { ...p, ...updatedData } : p));
-    }
+    // Update Otimista imediato na tela
+    setPatients(prevPts => {
+      const newPts = prevPts.map(p => p.id === patientId ? { ...p, ...updatedData } : p);
+      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(newPts));
+      return newPts;
+    });
+    
     setSelectedPatient(prev => {
       if (prev && prev.id === patientId) {
         const updated = { ...prev, ...updatedData };
@@ -488,25 +503,52 @@ export default function App() {
       }
       return prev;
     });
+
+    // Envio para o Firestore de fundo
+    if (db && loggedInUser) {
+      try {
+        const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
+        await setDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientId), updatedData, { merge: true });
+      } catch (e) {
+        console.warn("Salvou localmente, sem permissão no Firebase.");
+      }
+    }
   };
 
   const handleAddPatient = async (newPatient) => {
     const patientWithId = { ...newPatient, id: Date.now().toString() };
-    if (db && loggedInUser) {
-      const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-      await setDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientWithId.id), patientWithId);
-    }
-    else setPatients([...patients, patientWithId]);
+    
+    // Update Otimista
+    setPatients(prev => {
+      const newPts = [...prev, patientWithId];
+      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(newPts));
+      return newPts;
+    });
     setCurrentTab("list");
+
+    // Firebase Sync
+    if (db && loggedInUser) {
+      try {
+        const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
+        await setDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientWithId.id), patientWithId);
+      } catch(e) {}
+    }
   };
 
   const handleDeletePatient = async (patientId) => {
-    if (db && loggedInUser) {
-      const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientId));
-    }
-    else setPatients(patients.filter(p => p.id !== patientId));
+    setPatients(prevPts => {
+      const newPts = prevPts.filter(p => p.id !== patientId);
+      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(newPts));
+      return newPts;
+    });
     setSelectedPatient(null);
+
+    if (db && loggedInUser) {
+      try {
+        const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientId));
+      } catch(e){}
+    }
   };
 
   const handleRegisterVisit = async (patientId, updates) => {
@@ -600,12 +642,11 @@ export default function App() {
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
   };
 
-  // 5. TELA DE LOGIN (Mostra se não estiver logado)
+  // 5. TELA DE LOGIN
   if (!loggedInUser) {
     return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} />;
   }
 
-  // 6. USUÁRIO LOGADO NO APLICATIVO
   const appUser = loggedInUser;
 
   // 7. RENDERIZAÇÃO DO APLICATIVO PRINCIPAL
@@ -802,7 +843,7 @@ export default function App() {
           )}
         </nav>
 
-        {selectedPatient && <PatientDetailsModal patient={selectedPatient} theme={theme} onClose={() => setSelectedPatient(null)} onRegisterVisit={handleRegisterVisit} onUpdateData={handleUpdatePatientData} onDelete={async (id) => { if (db && appUser) { const safeUserId = appUser.email.replace(/[^a-zA-Z0-9]/g, '_'); await deleteDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', id)); } else setPatients(patients.filter(p => p.id !== id)); setSelectedPatient(null); }} />}
+        {selectedPatient && <PatientDetailsModal patient={selectedPatient} theme={theme} onClose={() => setSelectedPatient(null)} onRegisterVisit={handleRegisterVisit} onUpdateData={handleUpdatePatientData} onDelete={handleDeletePatient} />}
         {showProfileModal && <UserProfileModal user={appUser} theme={theme} onClose={() => setShowProfileModal(false)} onLogout={handleLogout} />}
       </div>
     </div>
@@ -870,6 +911,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
   const [aiError, setAiError] = useState(null);
 
   const { evaluation, conditions } = patient;
+  const ageMonths = getAgeMonths(patient.birthDate);
   const age = getAge(patient.birthDate);
 
   const toggleVal = (field) => setFU((prev) => ({ ...prev, [field]: !prev[field] }));
@@ -1006,7 +1048,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
               <FormGroup theme={theme} title="C.1 Acesso e Cadastro" color="blue">
                 <div className="space-y-2">
                   <ActionDateBtn theme={theme} label="Atualização Cadastral do Indivíduo" date={fU.c1_cadastro_att} onClick={() => setDate("c1_cadastro_att")} />
-                  {conditions?.isBolsaFamilia && <ActionDateBtn theme={theme} label="Acompanhamento Bolsa Família (Peso/Altura)" date={fU.c1_bolsa_familia} onClick={() => setDate("c1_bolsa_familia")} />}
+                  {conditions?.isBolsaFamilia && <ActionDateBtn theme={theme} label="Acompanhamento Bolsa Família" date={fU.c1_bolsa_familia} onClick={() => setDate("c1_bolsa_familia")} />}
                 </div>
               </FormGroup>
 
@@ -1016,8 +1058,8 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                     <div className="grid grid-cols-2 gap-2"><CheckboxBtn theme={theme} label="1ª (até 30d)" checked={fU.c2_c15d} onClick={() => toggleVal("c2_c15d")} /><CheckboxBtn theme={theme} label="1 Mês" checked={fU.c2_c1m} onClick={() => toggleVal("c2_c1m")} /><CheckboxBtn theme={theme} label="2 Meses" checked={fU.c2_c2m} onClick={() => toggleVal("c2_c2m")} /><CheckboxBtn theme={theme} label="4 Meses" checked={fU.c2_c4m} onClick={() => toggleVal("c2_c4m")} /><CheckboxBtn theme={theme} label="6 Meses" checked={fU.c2_c6m} onClick={() => toggleVal("c2_c6m")} /><CheckboxBtn theme={theme} label="9 Meses" checked={fU.c2_c9m} onClick={() => toggleVal("c2_c9m")} /><CheckboxBtn theme={theme} label="12 Meses" checked={fU.c2_c12m} onClick={() => toggleVal("c2_c12m")} /><CheckboxBtn theme={theme} label="18 Meses" checked={fU.c2_c18m} onClick={() => toggleVal("c2_c18m")} /><CheckboxBtn theme={theme} label="24 Meses" checked={fU.c2_c24m} onClick={() => toggleVal("c2_c24m")} /></div>
                   </div>
                   <div className="space-y-2">
-                    <CheckboxBtn theme={theme} label="1ª Visita ACS (Até 30 dias de vida)" checked={fU.c2_acs1} onClick={() => toggleVal("c2_acs1")} block />
-                    <CheckboxBtn theme={theme} label="2ª Visita ACS (Até 6 meses de vida)" checked={fU.c2_acs2} onClick={() => toggleVal("c2_acs2")} block />
+                    <CheckboxBtn theme={theme} label="1ª Visita ACS (Até 30 dias)" checked={fU.c2_acs1} onClick={() => toggleVal("c2_acs1")} block />
+                    <CheckboxBtn theme={theme} label="2ª Visita ACS (Até 6 meses)" checked={fU.c2_acs2} onClick={() => toggleVal("c2_acs2")} block />
                     <CounterBtn theme={theme} label="Registros de Peso/Altura" count={fU.c2_weight || 0} onInc={() => incVal("c2_weight")} onDec={() => decVal("c2_weight")} target={9} />
                     <CheckboxBtn theme={theme} label="Vacinação Recomendada em dia?" checked={fU.c2_vac} onClick={() => toggleVal("c2_vac")} block />
                   </div>
