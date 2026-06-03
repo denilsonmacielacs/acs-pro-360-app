@@ -40,13 +40,14 @@ if (firebaseConfigStr) {
 } else {
     // FALLBACK PARA DESENVOLVIMENTO (Substitua pelas suas chaves)
     const firebaseConfig = {
-      apiKey: "AIzaSyBcDVrgdyb62m_k8TcCG0DHIZtRKwwniIU",
-      authDomain: "agenda-acs-pro-360.firebaseapp.com",
-      projectId: "agenda-acs-pro-360",
-      storageBucket: "agenda-acs-pro-360.firebasestorage.app",
-      messagingSenderId: "118241574847",
-      appId: "1:118241574847:web:398ebad006816fbe88ab0a",
-      measurementId: "G-EFDR2G93K6"
+      apiKey: "AIzaSyDrEkPB1PRlqqZ4vLaSlej6SAU-XeAdDeE",
+      authDomain: "acs-pro-360.firebaseapp.com",
+      databaseURL: "https://acs-pro-360-default-rtdb.firebaseio.com",
+      projectId: "acs-pro-360",
+      storageBucket: "acs-pro-360.firebasestorage.app",
+      messagingSenderId: "440842746827",
+      appId: "1:440842746827:web:f4145c197db749b3c7d44e",
+      measurementId: "G-2S2G3VDDM2"
     };
     try {
         app = initializeApp(firebaseConfig);
