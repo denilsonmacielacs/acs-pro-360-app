@@ -37,8 +37,32 @@ if (firebaseConfigStr) {
   } catch (e) {
     console.error("Erro ao inicializar Firebase", e);
   }
+} else {
+    // FALLBACK PARA DESENVOLVIMENTO (Substitua pelas suas chaves)
+    const firebaseConfig = {
+      apiKey: "AIzaSyBcDVrgdyb62m_k8TcCG0DHIZtRKwwniIU",
+      authDomain: "agenda-acs-pro-360.firebaseapp.com",
+      projectId: "agenda-acs-pro-360",
+      storageBucket: "agenda-acs-pro-360.firebasestorage.app",
+      messagingSenderId: "118241574847",
+      appId: "1:118241574847:web:398ebad006816fbe88ab0a",
+      measurementId: "G-EFDR2G93K6"
+    };
+    try {
+        app = initializeApp(firebaseConfig);
+        adminApp = initializeApp(firebaseConfig, "AdminApp");
+        try {
+          db = initializeFirestore(app, {
+            localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+          });
+        } catch (cacheErr) {
+          db = getFirestore(app);
+        }
+        auth = getAuth(app);
+        adminAuth = getAuth(adminApp);
+    } catch (e) {}
 }
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const appId = "acs-pro-360";
 
 // --- GEMINI API SETUP ---
 const _keyParts = ["AQ.Ab8RN6If", "dS9K2ewFkn", "uPeDXRsmnxWEu", "b5RH-N8JDu8VyRljxfQ"];
@@ -173,13 +197,13 @@ const evaluateIndicators = (p) => {
   const age = getAge(p.birthDate); const ageMonths = getAgeMonths(p.birthDate); const daysAge = getAgeDays(p.birthDate);
   const rules = []; let hasPending = false; const ind = p.indicators || {};
 
-  const c1Items = [{ label: "Documento (CPF ou CNS) cadastrado", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro atualizado (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
+  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro atualizado (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
   if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Condicionalidades Bolsa Família (Semestral)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
   let isC1Ok = true; c1Items.forEach((i) => { if (i.status === "pending") { isC1Ok = false; hasPending = true; }});
   rules.push({ id: "C.1", title: "Acesso e Cadastro", icon: "📋", color: "bg-blue-500", isOk: isC1Ok, items: c1Items });
 
   if (ageMonths <= 24) {
-    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
+    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta (até 30d)" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
     let expected = 0; const mItems = milestones.map((m) => { const isDue = daysAge >= m.t - 15; if (isDue) expected++; return { label: m.l, status: getStatus(!!ind[m.key], isDue) }; });
     const acs1Due = daysAge >= 30 - 15; const acs2Due = daysAge >= 180 - 15; const wDue = expected > 0; const wOk = (ind.c2_weight || 0) >= expected;
     const items = [...mItems, { label: `Reg. peso/altura (${ind.c2_weight || 0}/${expected})`, status: getStatus(wOk, wDue) }, { label: "Visita ACS (Até 30 dias)", status: getStatus(!!ind.c2_acs1, acs1Due) }, { label: "Visita ACS (Até 6 meses)", status: getStatus(!!ind.c2_acs2, acs2Due) }, { label: "Vacinação em dia", status: getStatus(!!ind.c2_vac, true) }];
@@ -338,6 +362,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       if (user) {
+        // Se for o seu email principal, define como master
         const role = user.email === "denilsonmaciel.acs@gmail.com" ? "master" : "user";
         setLoggedInUser({ email: user.email, role: role, uid: user.uid });
       } else {
@@ -372,12 +397,13 @@ export default function App() {
       setIsLoadingData(false); return;
     }
     setIsLoadingData(true);
+    // PATH BLINDADO: Apenas este utilizador acede a esta pasta
     const q = collection(db, 'artifacts', appId, 'users', authUser.uid, 'patients');
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setPatients(pts); setIsLoadingData(false);
     }, (err) => {
-       console.error("Erro no Firebase.", err);
+       console.error("Erro de permissão no Firebase. Atualizou as regras?", err);
        setIsLoadingData(false);
     });
 
@@ -389,6 +415,7 @@ export default function App() {
           setAdminUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
        });
     }
+
     return () => { unsubscribe(); if (unsubAdmin) unsubAdmin(); };
   }, [authUser]);
 
@@ -464,12 +491,13 @@ export default function App() {
     return filterMicroarea === "Todas" ? processedPatients : processedPatients.filter((p) => p.microarea === filterMicroarea);
   }, [processedPatients, filterMicroarea]);
 
-  // 4. HANDLERS FIREBASE AUTH
+  // 4. HANDLERS FIREBASE AUTH (Seguros)
   const handleLogin = async (email, password) => {
     setIsLoggingIn(true);
     setLoginError("");
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // Login com sucesso, onAuthStateChanged fará o resto
     } catch (err) {
       setLoginError("Credenciais inválidas ou e-mail incorreto.");
     } finally {
@@ -495,7 +523,9 @@ export default function App() {
   };
 
   const handleUpdatePatientData = async (patientId, updatedData) => {
+    // Update Otimista imediato na tela
     setPatients(prevPts => prevPts.map(p => p.id === patientId ? { ...p, ...updatedData } : p));
+    
     setSelectedPatient(prev => {
       if (prev && prev.id === patientId) {
         const updated = { ...prev, ...updatedData };
@@ -504,25 +534,35 @@ export default function App() {
       }
       return prev;
     });
+
+    // Envio para o Firestore de fundo
     if (db && authUser) {
-      try { await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientId), updatedData, { merge: true }); } catch (e) {}
+      try {
+        await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientId), updatedData, { merge: true });
+      } catch (e) { console.error(e); }
     }
   };
 
   const handleAddPatient = async (newPatient) => {
     const patientWithId = { ...newPatient, id: Date.now().toString() };
-    setPatients(prev => [...prev, patientWithId]);
+    setPatients(prev => [...prev, patientWithId]); // Otimista
     setCurrentTab("list");
+
     if (db && authUser) {
-      try { await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientWithId.id), patientWithId); } catch(e) {}
+      try {
+        await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientWithId.id), patientWithId);
+      } catch(e) { console.error(e); }
     }
   };
 
   const handleDeletePatient = async (patientId) => {
-    setPatients(prevPts => prevPts.filter(p => p.id !== patientId));
+    setPatients(prevPts => prevPts.filter(p => p.id !== patientId)); // Otimista
     setSelectedPatient(null);
+
     if (db && authUser) {
-      try { await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientId)); } catch(e){}
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientId));
+      } catch(e){ console.error(e); }
     }
   };
 
@@ -697,12 +737,15 @@ export default function App() {
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
   };
 
+  // 5. TELA DE LOGIN (Mostra se não estiver logado)
   if (!loggedInUser) {
     return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} />;
   }
 
+  // 6. USUÁRIO LOGADO NO APLICATIVO
   const appUser = loggedInUser;
 
+  // 7. RENDERIZAÇÃO DO APLICATIVO PRINCIPAL
   return (
     <div className={`flex justify-center min-h-screen font-sans print:bg-white transition-colors duration-300 ${theme.bg}`}>
       <div className={`w-full max-w-md ${theme.bg} flex flex-col min-h-screen shadow-2xl relative overflow-hidden print:max-w-none print:shadow-none print:bg-white transition-colors duration-300`}>
@@ -1599,7 +1642,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
               <Plus className="w-5 h-5" />
             </button>
           </div>
-          {f.customTags.length > 0 && (
+          {f.customTags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 animate-in fade-in">
               {f.customTags.map(tag => (
                 <span key={tag} className={`flex items-center px-2 py-1 rounded-md text-[10px] font-bold border ${theme.isDark ? 'bg-teal-900/30 border-teal-800 text-teal-300' : 'bg-teal-50 border-teal-200 text-teal-700'}`}>
@@ -1607,7 +1650,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
                 </span>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
 
         {parseSafeDate(f.birthDate) && (
@@ -1632,25 +1675,13 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
 }
 
 function UserProfileModal({ user, theme, onClose, onLogout }) {
-  const [newPass, setNewPass] = useState("");
-  const [msg, setMsg] = useState("");
-  
-  const handlePass = (e) => {
-    e.preventDefault();
-    if(newPass.length < 6) { setMsg("Mínimo 6 caracteres"); return; }
-    // Num sistema real com Firebase Auth conectado a estes users, chamariamos a updatePassword do Firebase.
-    // Como esta gestão é feita pelo master localmente:
-    setMsg("⚠️ Por favor, solicite a troca de senha ao Administrador (Conta Master).");
-    setNewPass("");
-  };
-
   return (
     <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className={`${theme.card} rounded-3xl p-6 w-full max-w-sm animate-in zoom-in-95 shadow-2xl relative`}>
         <button onClick={onClose} className={`absolute top-4 right-4 p-2 rounded-full transition-colors ${theme.isDark ? 'bg-slate-700 text-slate-400 hover:bg-slate-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
           <X className="w-4 h-4" />
         </button>
-        <div className="flex flex-col items-center mb-4">
+        <div className="flex flex-col items-center mb-6">
           <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-3 ${theme.isDark ? 'bg-teal-900/40 text-teal-400' : 'bg-teal-100 text-teal-600'}`}>
             <User className="w-8 h-8" />
           </div>
@@ -1659,18 +1690,6 @@ function UserProfileModal({ user, theme, onClose, onLogout }) {
           <span className={`mt-2 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${theme.isDark ? 'bg-slate-800 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
             Conta {user.role === 'master' ? 'Administrador' : 'Agente'}
           </span>
-        </div>
-
-        <div className={`mb-4 pt-4 border-t ${theme.divider}`}>
-          <h4 className={`text-xs font-bold mb-3 ${theme.textSec}`}>ALTERAR PALAVRA-PASSE</h4>
-          <form onSubmit={handlePass} className="space-y-3">
-            <div className="relative">
-              <KeyRound className={`absolute left-3 top-3 w-4 h-4 ${theme.textSec}`} />
-              <input type="password" required placeholder="Nova senha (mínimo 6 letras)" className={`w-full pl-9 pr-3 py-2.5 rounded-xl text-sm outline-none border focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={newPass} onChange={(e) => setNewPass(e.target.value)} />
-            </div>
-            {msg && <p className={`text-[10px] font-bold ${msg.includes('✅') ? 'text-emerald-500' : 'text-amber-500'}`}>{msg}</p>}
-            <button type="submit" className="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 rounded-xl text-sm transition flex justify-center items-center">Atualizar Senha</button>
-          </form>
         </div>
         
         <button onClick={onLogout} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center transition-colors shadow-sm ${theme.isDark ? 'bg-red-900/20 text-red-400 border border-red-900/50 hover:bg-red-900/40' : 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100'}`}>
