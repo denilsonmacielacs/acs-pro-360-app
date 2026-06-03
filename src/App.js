@@ -695,6 +695,7 @@ export default function App() {
     iframeDoc.close();
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
 
+    // Fecha o modo de seleção após imprimir
     setIsSelectionMode(false);
     setSelectedForPrint([]);
   };
@@ -810,6 +811,7 @@ export default function App() {
                   <div className="flex justify-between items-center mb-3">
                     <h2 className={`${theme.textMain} font-bold`}>Pacientes ({filteredPatients.length})</h2>
                     <div className="flex space-x-2">
+                      {/* BOTÃO DE SELEÇÃO EM LOTE */}
                       <button 
                         onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedForPrint([]); }} 
                         className={`p-2 rounded-lg transition-colors ${isSelectionMode ? 'bg-teal-600 text-white' : (theme.isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-gray-600 border-gray-200')} border shadow-sm`}
@@ -1211,8 +1213,8 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                     <div className="grid grid-cols-2 gap-2"><CheckboxBtn theme={theme} label="1ª (até 30d)" checked={fU.c2_c15d} onClick={() => toggleVal("c2_c15d")} /><CheckboxBtn theme={theme} label="1 Mês" checked={fU.c2_c1m} onClick={() => toggleVal("c2_c1m")} /><CheckboxBtn theme={theme} label="2 Meses" checked={fU.c2_c2m} onClick={() => toggleVal("c2_c2m")} /><CheckboxBtn theme={theme} label="4 Meses" checked={fU.c2_c4m} onClick={() => toggleVal("c2_c4m")} /><CheckboxBtn theme={theme} label="6 Meses" checked={fU.c2_c6m} onClick={() => toggleVal("c2_c6m")} /><CheckboxBtn theme={theme} label="9 Meses" checked={fU.c2_c9m} onClick={() => toggleVal("c2_c9m")} /><CheckboxBtn theme={theme} label="12 Meses" checked={fU.c2_c12m} onClick={() => toggleVal("c2_c12m")} /><CheckboxBtn theme={theme} label="18 Meses" checked={fU.c2_c18m} onClick={() => toggleVal("c2_c18m")} /><CheckboxBtn theme={theme} label="24 Meses" checked={fU.c2_c24m} onClick={() => toggleVal("c2_c24m")} /></div>
                   </div>
                   <div className="space-y-2">
-                    <CheckboxBtn theme={theme} label="1ª Visita ACS (Até 30 dias de vida)" checked={fU.c2_acs1} onClick={() => toggleVal("c2_acs1")} block />
-                    <CheckboxBtn theme={theme} label="2ª Visita ACS (Até 6 meses de vida)" checked={fU.c2_acs2} onClick={() => toggleVal("c2_acs2")} block />
+                    <CheckboxBtn theme={theme} label="1ª Visita ACS (Até 30 dias)" checked={fU.c2_acs1} onClick={() => toggleVal("c2_acs1")} block />
+                    <CheckboxBtn theme={theme} label="2ª Visita ACS (Até 6 meses)" checked={fU.c2_acs2} onClick={() => toggleVal("c2_acs2")} block />
                     <CounterBtn theme={theme} label="Registros de Peso/Altura" count={fU.c2_weight || 0} onInc={() => incVal("c2_weight")} onDec={() => decVal("c2_weight")} target={9} />
                     <CheckboxBtn theme={theme} label="Vacinação Recomendada em dia?" checked={fU.c2_vac} onClick={() => toggleVal("c2_vac")} block />
                   </div>
@@ -1336,7 +1338,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
   });
 
   const [newTagInput, setNewTagInput] = useState("");
-  const ageMonths = getAgeMonths(f.birthDate);
+  const ageMonths = f.birthDate ? getAgeMonths(f.birthDate) : 999;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -1642,7 +1644,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
               <Plus className="w-5 h-5" />
             </button>
           </div>
-          {f.customTags.length > 0 ? (
+          {f.customTags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 animate-in fade-in">
               {f.customTags.map(tag => (
                 <span key={tag} className={`flex items-center px-2 py-1 rounded-md text-[10px] font-bold border ${theme.isDark ? 'bg-teal-900/30 border-teal-800 text-teal-300' : 'bg-teal-50 border-teal-200 text-teal-700'}`}>
@@ -1650,7 +1652,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
                 </span>
               ))}
             </div>
-          ) : null}
+          )}
         </div>
 
         {parseSafeDate(f.birthDate) && (
@@ -1674,7 +1676,20 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
   );
 }
 
-function UserProfileModal({ user, theme, onClose, onLogout }) {
+function UserProfileModal({ user, theme, onClose, onLogout, onChangePassword }) {
+  const [newPwd, setNewPwd] = useState("");
+  const [msg, setMsg] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleUpdate = async () => {
+    if (newPwd.length < 6) { setMsg("A senha deve ter no mínimo 6 caracteres."); return; }
+    setIsUpdating(true);
+    const res = await onChangePassword(newPwd);
+    setMsg(res.msg);
+    if(res.success) setNewPwd("");
+    setIsUpdating(false);
+  };
+
   return (
     <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className={`${theme.card} rounded-3xl p-6 w-full max-w-sm animate-in zoom-in-95 shadow-2xl relative`}>
@@ -1690,6 +1705,17 @@ function UserProfileModal({ user, theme, onClose, onLogout }) {
           <span className={`mt-2 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${theme.isDark ? 'bg-slate-800 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
             Conta {user.role === 'master' ? 'Administrador' : 'Agente'}
           </span>
+        </div>
+
+        <div className={`mb-6 pt-4 border-t ${theme.divider}`}>
+          <label className={`block text-xs font-bold mb-2 ${theme.textSec}`}>Alterar Senha Pessoal</label>
+          {msg && <div className={`mb-3 text-[10px] font-bold p-2 rounded-lg ${msg.includes('✅') ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{msg}</div>}
+          <div className="flex space-x-2">
+            <input type="text" placeholder="Nova senha" className={`flex-1 rounded-xl p-2.5 text-sm outline-none border focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
+            <button onClick={handleUpdate} disabled={isUpdating} className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition">
+              {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
         
         <button onClick={onLogout} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center transition-colors shadow-sm ${theme.isDark ? 'bg-red-900/20 text-red-400 border border-red-900/50 hover:bg-red-900/40' : 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100'}`}>
@@ -1812,7 +1838,7 @@ function NavBtn({ icon, label, active, onClick, badge, theme }) {
   );
 }
 
-function PatientListItem({ patient, onClick, filterCondition, isSelectionMode, isSelected, onToggleSelect, isAlert, onPrint, theme }) {
+function PatientListItem({ patient, onClick, filterCondition, isAlert, onPrint, isSelectionMode, isSelected, onToggleSelect, theme }) {
   const { evaluation } = patient;
   const tags = getPatientTags(patient, theme);
 
