@@ -305,7 +305,7 @@ function LoginScreen({ theme, onLogin, error, isLoading }) {
         </div>
         
         {error && (
-          <div className="mb-4 p-3 bg-red-100 border border-red-200 text-red-700 text-sm rounded-xl font-bold text-center">
+          <div className={`mb-4 p-3 border text-sm rounded-xl font-bold text-center ${error.includes('⚠️') ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-red-100 border-red-200 text-red-700'}`}>
             {error}
           </div>
         )}
@@ -499,7 +499,16 @@ export default function App() {
       await signInWithEmailAndPassword(auth, email, password);
       // Login com sucesso, onAuthStateChanged fará o resto
     } catch (err) {
-      setLoginError("Credenciais inválidas ou e-mail incorreto.");
+      console.error("Erro completo do Firebase no Login:", err);
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setLoginError("Credenciais inválidas ou e-mail incorreto.");
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setLoginError("⚠️ Domínio bloqueado! Vá no painel do Firebase > Authentication > Settings > Authorized Domains e adicione a URL da Vercel.");
+      } else if (err.code === 'auth/too-many-requests') {
+        setLoginError("Muitas tentativas. Sua conta foi temporariamente bloqueada por segurança.");
+      } else {
+        setLoginError(`Falha no login: ${err.message}`);
+      }
     } finally {
       setIsLoggingIn(false);
     }
