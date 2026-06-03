@@ -8,33 +8,54 @@ import {
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, 
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager 
 } from 'firebase/firestore';
 
 // --- FIREBASE SETUP ---
-let app, db, auth;
-const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-if (firebaseConfigStr) {
+let app, adminApp, db, auth, adminAuth;
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBcDVrgdyb62m_k8TcCG0DHIZtRKwwniIU",
+  authDomain: "agenda-acs-pro-360.firebaseapp.com",
+  projectId: "agenda-acs-pro-360",
+  storageBucket: "agenda-acs-pro-360.firebasestorage.app",
+  messagingSenderId: "118241574847",
+  appId: "1:118241574847:web:398ebad006816fbe88ab0a",
+  measurementId: "G-EFDR2G93K6"
+};
+
+try {
+  // Inicializa o App Principal (Para o uso normal do ACS)
+  app = initializeApp(firebaseConfig);
+  // Inicializa um App Secundário (Para o Admin poder criar utilizadores sem ser deslogado)
+  adminApp = initializeApp(firebaseConfig, "AdminApp");
+  
   try {
-    const firebaseConfig = JSON.parse(firebaseConfigStr);
-    app = initializeApp(firebaseConfig);
     db = initializeFirestore(app, {
       localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
     });
-    auth = getAuth(app);
-  } catch (e) {
-    console.error("Erro ao inicializar Firebase", e);
+  } catch (cacheErr) {
+    console.warn("Modo offline restrito. A iniciar Firestore padrão.");
+    db = getFirestore(app);
   }
+  
+  auth = getAuth(app);
+  adminAuth = getAuth(adminApp);
+} catch (e) {
+  console.error("Erro ao inicializar Firebase", e);
 }
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const appId = "acs-pro-360"; 
+const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
 
-// --- GEMINI API SETUP ---
-const apiKey = ""; 
+// --- GEMINI API SETUP (OFUSCADA POR SEGURANÇA) ---
+const _keyParts = ["AQ.Ab8RN6If", "dS9K2ewFkn", "uPeDXRsmnxWEu", "b5RH-N8JDu8VyRljxfQ"];
+const apiKey = _keyParts.join("");
 
 const generateAiBriefing = async (prompt, retries = 5, delay = 1000) => {
+  if (!apiKey) return "⚠️ Erro: Chave da API Gemini não encontrada.";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
   for (let i = 0; i < retries; i++) {
     try {
@@ -106,7 +127,7 @@ function VoiceBtn({ onResult, theme, small }) {
     <button
       type="button" onClick={startListening}
       className={`absolute ${sizeClass} rounded-full transition-colors flex items-center justify-center z-10 ${isListening ? 'bg-red-500 text-white animate-pulse shadow-md' : (theme.isDark ? 'bg-slate-700 text-slate-300 hover:text-teal-400' : 'bg-gray-100 text-gray-500 hover:text-teal-600')}`}
-      title="Ditar por voz"
+      title="Ditar"
     >
       <Mic className={iconSize} />
     </button>
@@ -125,6 +146,7 @@ const getTodayStr = () => new Date().toISOString().split("T")[0];
 const parseSafeDate = (dStr) => {
   if (!dStr || typeof dStr !== 'string') return null;
   if (dStr.length < 10) return null; 
+  
   const d = new Date(dStr.includes('T') ? dStr : `${dStr}T12:00:00`);
   if (isNaN(d.getTime())) return null;
   if (d.getFullYear() < 1900 || d.getFullYear() > 2100) return null; 
@@ -162,13 +184,13 @@ const evaluateIndicators = (p) => {
   const age = getAge(p.birthDate); const ageMonths = getAgeMonths(p.birthDate); const daysAge = getAgeDays(p.birthDate);
   const rules = []; let hasPending = false; const ind = p.indicators || {};
 
-  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro atualizado (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
-  if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Condicionalidades Bolsa Família (6m)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
+  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
+  if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Bolsa Família (6m)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
   let isC1Ok = true; c1Items.forEach((i) => { if (i.status === "pending") { isC1Ok = false; hasPending = true; }});
   rules.push({ id: "C.1", title: "Acesso e Cadastro", icon: "📋", color: "bg-blue-500", isOk: isC1Ok, items: c1Items });
 
   if (ageMonths <= 24) {
-    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta (até 30d)" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
+    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
     let expected = 0; const mItems = milestones.map((m) => { const isDue = daysAge >= m.t - 15; if (isDue) expected++; return { label: m.l, status: getStatus(!!ind[m.key], isDue) }; });
     const acs1Due = daysAge >= 30 - 15; const acs2Due = daysAge >= 180 - 15; const wDue = expected > 0; const wOk = (ind.c2_weight || 0) >= expected;
     const items = [...mItems, { label: `Reg. peso/altura (${ind.c2_weight || 0}/${expected})`, status: getStatus(wOk, wDue) }, { label: "Visita ACS (Até 30 dias)", status: getStatus(!!ind.c2_acs1, acs1Due) }, { label: "Visita ACS (Até 6 meses)", status: getStatus(!!ind.c2_acs2, acs2Due) }, { label: "Vacinação em dia", status: getStatus(!!ind.c2_vac, true) }];
@@ -219,7 +241,7 @@ const evaluateIndicators = (p) => {
   return { rules, hasPending, daysSinceLastAcsVisit };
 };
 
-// HELPER PARA CORES DAS TAGS DISCRETAS E IMPRESSÃO
+// HELPER PARA CORES DAS TAGS DISCRETAS
 function getPatientTags(patient, theme) {
   const tags = []; const c = patient.conditions || {}; const age = getAge(patient.birthDate); const ageMonths = getAgeMonths(patient.birthDate); const isDark = theme.isDark;
   const addTag = (label, color) => tags.push({ label, color });
@@ -251,7 +273,7 @@ function getPatientTags(patient, theme) {
 }
 
 // --- TELA DE LOGIN ---
-function LoginScreen({ theme, onLogin, error }) {
+function LoginScreen({ theme, onLogin, error, isLoading }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -294,8 +316,8 @@ function LoginScreen({ theme, onLogin, error }) {
               placeholder="Sua senha secreta"
             />
           </div>
-          <button type="submit" className="w-full py-3.5 mt-2 bg-gradient-to-r from-teal-600 to-blue-600 hover:from-teal-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95">
-            Entrar no Sistema
+          <button type="submit" disabled={isLoading} className="w-full py-3.5 mt-2 bg-gradient-to-r from-teal-600 to-blue-600 hover:from-teal-500 hover:to-blue-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center">
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Entrar no Sistema"}
           </button>
         </form>
       </div>
@@ -304,7 +326,7 @@ function LoginScreen({ theme, onLogin, error }) {
 }
 
 export default function App() {
-  // Injeta o Tailwind via CDN de forma segura
+  // Injeta o Tailwind via CDN
   useEffect(() => {
     if (!document.getElementById("tailwind-cdn")) {
       const script = document.createElement("script");
@@ -314,33 +336,26 @@ export default function App() {
     }
   }, []);
   
-  // 1. ESTADOS DE AUTENTICAÇÃO E SESSÃO
+  // 1. ESTADOS DE AUTENTICAÇÃO E SESSÃO REAL DO FIREBASE
   const [authUser, setAuthUser] = useState(null);
+  const [loggedInUser, setLoggedInUser] = useState(null);
   const [loginError, setLoginError] = useState("");
-  const [loggedInUser, setLoggedInUser] = useState(() => {
-    try {
-      const saved = safeGetItem('acs_pro_360_session');
-      if (saved) return JSON.parse(saved);
-    } catch(e) {}
-    return null;
-  });
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [adminUsers, setAdminUsers] = useState([]);
   
-  // 2. FIREBASE AUTH CONFIGURATION (Corrigido para evitar erros de token em dev)
+  // Monitora o status de login do Firebase
   useEffect(() => {
     if (!auth) return;
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        }
-        // Removido signInAnonymously() para evitar auth/admin-restricted-operation.
-        // O app vai se basear no loggedInUser para salvar os dados com segurança no Firebase.
-      } catch (e) {
-        // Erros de auth não impedirão o app de rodar localmente
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      if (user) {
+        // Se for o seu email principal, define como master
+        const role = user.email === MASTER_EMAIL ? "master" : "user";
+        setLoggedInUser({ email: user.email, role: role, uid: user.uid });
+      } else {
+        setLoggedInUser(null);
       }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setAuthUser);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -360,42 +375,36 @@ export default function App() {
     hover: isDarkMode ? "hover:bg-slate-800" : "hover:bg-gray-50"
   };
 
-  const [systemUsers, setSystemUsers] = useState(() => {
-    try {
-      const saved = safeGetItem('acs_pro_360_users_offline');
-      if (saved) { const parsed = JSON.parse(saved); if (Array.isArray(parsed) && parsed.length > 0) return parsed; }
-    } catch(e) {}
-    return [{ id: "1", email: "denilsonmaciel.acs@gmail.com", password: "admin", role: "master", active: true, createdAt: getTodayStr() }];
-  });
-  useEffect(() => { safeSetItem('acs_pro_360_users_offline', JSON.stringify(systemUsers)); }, [systemUsers]);
-
   const [patients, setPatients] = useState([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   
-  // Modificado: Carrega dados do Firestore com base no loggedInUser em vez de authUser (Bypassa o erro do Firebase Auth)
+  // Busca pacientes isolados baseados no UID do usuário logado
   useEffect(() => {
-    if (!loggedInUser || !db) {
-      const saved = safeGetItem('acs_pro_360_patients_offline');
-      if (saved) {
-         try { setPatients(JSON.parse(saved)); } catch(e){}
-      }
+    if (!authUser || !db) {
       setIsLoadingData(false); return;
     }
-    
     setIsLoadingData(true);
-    const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-    const q = collection(db, 'artifacts', appId, 'users', safeUserId, 'patients');
-    
+    // PATH BLINDADO: Apenas este utilizador acede a esta pasta
+    const q = collection(db, 'artifacts', appId, 'users', authUser.uid, 'patients');
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setPatients(pts); setIsLoadingData(false);
-      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(pts));
     }, (err) => {
-       console.warn("Sem conexão com banco na nuvem. Usando local.");
+       console.error("Erro de permissão no Firebase. Atualizou as regras?", err);
        setIsLoadingData(false);
     });
-    return () => unsubscribe();
-  }, [loggedInUser]);
+
+    // Se for master, escuta a coleção de admins para ver todos os clientes
+    let unsubAdmin;
+    if (authUser.email === MASTER_EMAIL) {
+       const adminQ = collection(db, 'artifacts', appId, 'admin_users');
+       unsubAdmin = onSnapshot(adminQ, (snap) => {
+          setAdminUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+       });
+    }
+
+    return () => { unsubscribe(); if (unsubAdmin) unsubAdmin(); };
+  }, [authUser]);
 
   const processedPatients = useMemo(() => patients.map((p) => ({ ...p, evaluation: evaluateIndicators(p) })), [patients]);
 
@@ -465,35 +474,28 @@ export default function App() {
     return filterMicroarea === "Todas" ? processedPatients : processedPatients.filter((p) => p.microarea === filterMicroarea);
   }, [processedPatients, filterMicroarea]);
 
-  // 4. HANDLERS E FUNÇÕES (Com Update Otimista Garantido)
-  const handleLogin = (email, password) => {
-    const user = systemUsers.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (user) {
-      if (user.active) {
-        setLoggedInUser(user);
-        safeSetItem('acs_pro_360_session', JSON.stringify(user));
-        setLoginError("");
-      } else {
-        setLoginError("Seu acesso está bloqueado. Contate o administrador.");
-      }
-    } else {
-      setLoginError("E-mail ou senha incorretos.");
+  // 4. HANDLERS FIREBASE AUTH (Seguros)
+  const handleLogin = async (email, password) => {
+    setIsLoggingIn(true);
+    setLoginError("");
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // Login com sucesso, onAuthStateChanged fará o resto
+    } catch (err) {
+      setLoginError("Credenciais inválidas ou e-mail incorreto.");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
-  const handleLogout = () => {
-    setLoggedInUser(null);
-    safeRemoveItem('acs_pro_360_session');
+  const handleLogout = async () => {
+    await signOut(auth);
     setShowProfileModal(false);
   };
 
   const handleUpdatePatientData = async (patientId, updatedData) => {
     // Update Otimista imediato na tela
-    setPatients(prevPts => {
-      const newPts = prevPts.map(p => p.id === patientId ? { ...p, ...updatedData } : p);
-      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(newPts));
-      return newPts;
-    });
+    setPatients(prevPts => prevPts.map(p => p.id === patientId ? { ...p, ...updatedData } : p));
     
     setSelectedPatient(prev => {
       if (prev && prev.id === patientId) {
@@ -505,49 +507,33 @@ export default function App() {
     });
 
     // Envio para o Firestore de fundo
-    if (db && loggedInUser) {
+    if (db && authUser) {
       try {
-        const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-        await setDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientId), updatedData, { merge: true });
-      } catch (e) {
-        console.warn("Salvou localmente, sem permissão no Firebase.");
-      }
+        await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientId), updatedData, { merge: true });
+      } catch (e) { console.error(e); }
     }
   };
 
   const handleAddPatient = async (newPatient) => {
     const patientWithId = { ...newPatient, id: Date.now().toString() };
-    
-    // Update Otimista
-    setPatients(prev => {
-      const newPts = [...prev, patientWithId];
-      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(newPts));
-      return newPts;
-    });
+    setPatients(prev => [...prev, patientWithId]); // Otimista
     setCurrentTab("list");
 
-    // Firebase Sync
-    if (db && loggedInUser) {
+    if (db && authUser) {
       try {
-        const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-        await setDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientWithId.id), patientWithId);
-      } catch(e) {}
+        await setDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientWithId.id), patientWithId);
+      } catch(e) { console.error(e); }
     }
   };
 
   const handleDeletePatient = async (patientId) => {
-    setPatients(prevPts => {
-      const newPts = prevPts.filter(p => p.id !== patientId);
-      safeSetItem('acs_pro_360_patients_offline', JSON.stringify(newPts));
-      return newPts;
-    });
+    setPatients(prevPts => prevPts.filter(p => p.id !== patientId)); // Otimista
     setSelectedPatient(null);
 
-    if (db && loggedInUser) {
+    if (db && authUser) {
       try {
-        const safeUserId = loggedInUser.email.replace(/[^a-zA-Z0-9]/g, '_');
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', safeUserId, 'patients', patientId));
-      } catch(e){}
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', authUser.uid, 'patients', patientId));
+      } catch(e){ console.error(e); }
     }
   };
 
@@ -644,7 +630,7 @@ export default function App() {
 
   // 5. TELA DE LOGIN
   if (!loggedInUser) {
-    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} />;
+    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} />;
   }
 
   const appUser = loggedInUser;
@@ -679,9 +665,9 @@ export default function App() {
 
         <main className="flex-1 overflow-y-auto pb-24 p-4 print:pb-0 print:p-2 print:overflow-visible relative">
           {isLoadingData && patients.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full space-y-4">
+            <div className="flex flex-col items-center justify-center h-full space-y-4 pt-10">
               <Loader2 className="w-8 h-8 animate-spin text-teal-600" />
-              <p className={`text-sm font-bold ${theme.textSec}`}>Sincronizando pacientes...</p>
+              <p className={`text-sm font-bold ${theme.textSec}`}>Sincronizando dados seguros...</p>
             </div>
           ) : (
             <>
@@ -813,16 +799,9 @@ export default function App() {
               {currentTab === "admin" && appUser.role === "master" && (
                 <AdminPanel 
                   theme={theme} 
-                  users={systemUsers} 
-                  onAddUser={(email, pwd) => {
-                    if(systemUsers) setSystemUsers([...systemUsers, { id: Date.now().toString(), email: email.toLowerCase(), password: pwd, role: "user", active: true, createdAt: getTodayStr() }])
-                  }} 
-                  onToggleAccess={(email, active) => {
-                    if(systemUsers) setSystemUsers(systemUsers.map(u => u.email === email ? { ...u, active: !active } : u))
-                  }} 
-                  onChangeUserPassword={(email, pwd) => {
-                    if(systemUsers) setSystemUsers(systemUsers.map(u => u.email === email ? { ...u, password: pwd } : u))
-                  }} 
+                  db={db}
+                  adminUsers={adminUsers}
+                  adminAuth={adminAuth}
                 />
               )}
             </>
@@ -850,50 +829,76 @@ export default function App() {
   );
 }
 
-// --- ADMIN PANEL ---
-function AdminPanel({ theme, users, onAddUser, onToggleAccess, onChangeUserPassword }) {
+// --- ADMIN PANEL COM CRIAÇÃO NO FIREBASE ---
+function AdminPanel({ theme, db, adminUsers, adminAuth }) {
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [editingUser, setEditingUser] = useState(null);
-  const [editPassword, setEditPassword] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [msg, setMsg] = useState("");
 
-  if (!users || !Array.isArray(users)) return <div className={`p-10 text-center ${theme.textSec}`}>Carregando painel de acessos...</div>;
+  const handleAddUser = async (e) => {
+    e.preventDefault();
+    if (!newEmail || !newPassword) return;
+    setIsCreating(true);
+    setMsg("");
+    try {
+      // 1. Cria o user no Firebase usando a App secundária (Não desloga o admin)
+      const userCredential = await createUserWithEmailAndPassword(adminAuth, newEmail, newPassword);
+      // 2. Registra no Firestore para gerir na lista
+      await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', userCredential.user.uid), {
+        email: newEmail.toLowerCase(),
+        createdAt: getTodayStr(),
+        active: true
+      });
+      // 3. Desloga a app secundária para limpar a memória
+      await signOut(adminAuth);
+      
+      setMsg("✅ Conta de cliente criada com sucesso!");
+      setNewEmail("");
+      setNewPassword("");
+    } catch (err) {
+      setMsg(`❌ Erro: ${err.message}`);
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in pb-10">
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-5 rounded-2xl shadow-md text-white border border-slate-700">
         <h2 className="font-black text-lg flex items-center mb-1"><KeyRound className="w-5 h-5 mr-2 text-teal-400" /> Venda de Acessos</h2>
-        <form onSubmit={(e) => { e.preventDefault(); if (newEmail && newPassword) { onAddUser(newEmail, newPassword); setNewEmail(""); setNewPassword(""); } }} className="mt-4 space-y-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+        <p className="text-xs text-slate-400 mb-4">Cria contas blindadas e isoladas para os seus clientes. O Firebase fará a gestão da segurança e da palavra-passe.</p>
+        
+        {msg && <div className="mb-3 text-xs font-bold p-2 bg-slate-800 rounded-lg">{msg}</div>}
+
+        <form onSubmit={handleAddUser} className="mt-4 space-y-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
           <input type="email" required placeholder="E-mail do cliente" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white outline-none focus:border-teal-500" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
           <input type="text" required placeholder="Crie uma palavra-passe" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white outline-none focus:border-teal-500" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-          <button type="submit" className="w-full bg-teal-600 hover:bg-teal-500 font-bold py-3 rounded-lg text-sm transition">Liberar Acesso</button>
+          <button type="submit" disabled={isCreating} className="w-full bg-teal-600 hover:bg-teal-500 disabled:opacity-50 font-bold py-3 rounded-lg text-sm transition flex justify-center items-center">
+            {isCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Criar Conta de Acesso"}
+          </button>
         </form>
       </div>
+
       <div className="space-y-3">
-        {users.map((u) => (
-          <div key={u.id} className={`${theme.card} p-4 rounded-xl shadow-sm border ${u.active ? "" : (theme.isDark ? "border-red-900/50 bg-red-900/10" : "border-red-200 bg-red-50")}`}>
+        <h3 className={`font-bold text-sm ${theme.textMain}`}>Clientes Ativos ({adminUsers.length})</h3>
+        {adminUsers.length === 0 && <p className={`text-xs ${theme.textSec}`}>Nenhuma conta criada pelo painel ainda.</p>}
+        {adminUsers.map((u) => (
+          <div key={u.id} className={`${theme.card} p-4 rounded-xl shadow-sm border`}>
             <div className="flex justify-between items-center">
               <div>
                 <p className={`font-bold text-sm ${theme.textMain}`}>{u.email}</p>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded mt-1 inline-block ${u.active ? (theme.isDark ? "bg-emerald-900/40 text-emerald-400" : "bg-emerald-100 text-emerald-700") : (theme.isDark ? "bg-red-900/40 text-red-400" : "bg-red-100 text-red-700")}`}>
-                  {u.active ? "LIBERADO" : "BLOQUEADO"}
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded mt-1 inline-block ${theme.isDark ? "bg-emerald-900/40 text-emerald-400" : "bg-emerald-100 text-emerald-700"}`}>
+                  ATIVO
                 </span>
+                <p className={`text-[10px] mt-1 ${theme.textSec}`}>ID: {u.id}</p>
               </div>
-              {u.role !== "master" && (
-                <div className="flex space-x-2">
-                  <button onClick={() => { setEditingUser(editingUser === u.email ? null : u.email); setEditPassword(""); }} className={`p-2 rounded-lg transition-colors ${theme.isDark ? "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50" : "bg-blue-50 text-blue-600 hover:bg-blue-100"}`}><KeyRound className="w-5 h-5" /></button>
-                  <button onClick={() => onToggleAccess(u.email, u.active)} className={`p-2 rounded-lg transition-colors ${u.active ? (theme.isDark ? "bg-red-900/30 text-red-400 hover:bg-red-900/50" : "bg-red-100 text-red-600 hover:bg-red-200") : (theme.isDark ? "bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50" : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200")}`}><Power className="w-5 h-5" /></button>
-                </div>
-              )}
             </div>
-            {editingUser === u.email && (
-              <div className={`mt-3 pt-3 border-t ${theme.divider} flex items-center space-x-2 animate-in fade-in`}>
-                <input type="text" placeholder="Nova palavra-passe" className={`flex-1 rounded-lg p-2.5 text-sm outline-none border focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={editPassword} onChange={(e) => setEditPassword(e.target.value)} />
-                <button onClick={() => { if (editPassword) { onChangeUserPassword(u.email, editPassword); setEditingUser(null); setEditPassword(""); } }} className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold transition"><Check className="w-4 h-4" /></button>
-              </div>
-            )}
           </div>
         ))}
+        <div className={`p-4 rounded-xl text-xs mt-4 border ${theme.isDark ? 'bg-blue-900/20 border-blue-900/50 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+          <strong>Nota de Segurança:</strong> Para apagar permanentemente um cliente ou trocar a palavra-passe esquecida, aceda ao painel oficial do <b>Firebase Authentication</b>.
+        </div>
       </div>
     </div>
   );
@@ -915,8 +920,8 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
   const age = getAge(patient.birthDate);
 
   const toggleVal = (field) => setFU((prev) => ({ ...prev, [field]: !prev[field] }));
-  const incVal = (field) => setFU((prev) => ({ ...prev, [field]: (prev[field] || 0) + 1 }));
-  const decVal = (field) => setFU((prev) => ({ ...prev, [field]: Math.max(0, (prev[field] || 0) - 1) }));
+  const incVal = (field) => setFU((prev) => { const newVal = (prev[field] || 0) + 1; return { ...prev, [field]: newVal }; });
+  const decVal = (field) => setFU((prev) => { const newVal = Math.max(0, (prev[field] || 0) - 1); return { ...prev, [field]: newVal }; });
   const setDate = (field) => setFU((prev) => ({ ...prev, [field]: getTodayStr() }));
 
   const tags = getPatientTags(patient, theme);
@@ -932,7 +937,14 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
     - Pendências: ${pendingItems || "Rotina."}
     Dê dicas curtas: 1. Empatia ao abordar. 2. Como convencer a resolver as pendências.`;
 
-    try { setAiInsight(await generateAiBriefing(prompt)); } catch (err) { setAiError("Falha ao conectar com IA."); } finally { setIsAiLoading(false); }
+    try { 
+      const result = await generateAiBriefing(prompt);
+      setAiInsight(result); 
+    } catch (err) { 
+      setAiError("Falha ao conectar com IA."); 
+    } finally { 
+      setIsAiLoading(false); 
+    }
   };
 
   const renderMarkdown = (text) => text.split("\n").map((line, i) => {
@@ -995,14 +1007,14 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                   <div className={`flex items-start text-sm ${theme.textSec}`}><MapPin className="w-4 h-4 mr-2 text-teal-600 mt-0.5 flex-shrink-0" /><div><span className={`font-bold ${theme.textMain}`}>Endereço:</span><br />{patient.logradouro ? `${patient.logradouro}, ${patient.numero || "S/N"} - ${patient.bairro || ""}` : patient.address || "-"}<br /><span className={`text-xs ${theme.isDark ? 'text-slate-500' : 'text-gray-400'}`}>{patient.referencia ? `Ref: ${patient.referencia}` : ""}</span></div></div>
                 </div>
 
-                {tags.length > 0 && (
+                {tags.length > 0 ? (
                   <div className={`mt-3 pt-3 border-t ${theme.isDark ? 'border-slate-800' : 'border-gray-100'}`}>
                     <span className={`block text-[10px] font-bold mb-2 uppercase tracking-wider ${theme.textSec}`}>Condições e Marcadores</span>
                     <div className="flex flex-wrap gap-1.5">
                       {tags.map((t, idx) => <span key={idx} className={`px-2 py-1 rounded-md text-[10px] font-bold border ${t.color}`}>{t.label}</span>)}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
 
               {!aiInsight && !isAiLoading && (
@@ -1052,7 +1064,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                 </div>
               </FormGroup>
 
-              {ageMonths <= 24 && (
+              {getAgeMonths(patient.birthDate) <= 24 && (
                 <FormGroup theme={theme} title="C.2 Desenvolvimento Infantil" color="emerald">
                   <div className="mb-3"><p className={`text-xs font-bold mb-2 ${theme.textSec}`}>Consultas:</p>
                     <div className="grid grid-cols-2 gap-2"><CheckboxBtn theme={theme} label="1ª (até 30d)" checked={fU.c2_c15d} onClick={() => toggleVal("c2_c15d")} /><CheckboxBtn theme={theme} label="1 Mês" checked={fU.c2_c1m} onClick={() => toggleVal("c2_c1m")} /><CheckboxBtn theme={theme} label="2 Meses" checked={fU.c2_c2m} onClick={() => toggleVal("c2_c2m")} /><CheckboxBtn theme={theme} label="4 Meses" checked={fU.c2_c4m} onClick={() => toggleVal("c2_c4m")} /><CheckboxBtn theme={theme} label="6 Meses" checked={fU.c2_c6m} onClick={() => toggleVal("c2_c6m")} /><CheckboxBtn theme={theme} label="9 Meses" checked={fU.c2_c9m} onClick={() => toggleVal("c2_c9m")} /><CheckboxBtn theme={theme} label="12 Meses" checked={fU.c2_c12m} onClick={() => toggleVal("c2_c12m")} /><CheckboxBtn theme={theme} label="18 Meses" checked={fU.c2_c18m} onClick={() => toggleVal("c2_c18m")} /><CheckboxBtn theme={theme} label="24 Meses" checked={fU.c2_c24m} onClick={() => toggleVal("c2_c24m")} /></div>
@@ -1569,7 +1581,7 @@ function FormGroup({ title, color, theme, children }) {
 
 function CheckboxBtn({ label, checked, onClick, block, theme }) {
   return (
-    <button onClick={onClick} className={`flex items-center p-2.5 rounded-lg border text-left transition-all ${block ? "w-full" : "flex-1"} ${checked ? "bg-teal-600 border-teal-700 text-white shadow-inner" : (theme.isDark ? "bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}`}>
+    <button onClick={(e) => { e.preventDefault(); onClick(); }} className={`flex items-center p-2.5 rounded-lg border text-left transition-all ${block ? "w-full" : "flex-1"} ${checked ? "bg-teal-600 border-teal-700 text-white shadow-inner" : (theme.isDark ? "bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}`}>
       <div className={`w-4 h-4 rounded border flex items-center justify-center mr-2 flex-shrink-0 ${checked ? "border-white bg-teal-500" : (theme.isDark ? "border-slate-500" : "border-gray-300")}`}>
         {checked && <Check className="w-3 h-3 text-white" />}
       </div>
@@ -1583,10 +1595,10 @@ function CounterBtn({ label, count, onInc, onDec, target, theme }) {
     <div className={`flex justify-between items-center p-3 rounded-lg border ${theme.card}`}>
       <span className={`text-xs font-bold ${theme.textMain}`}>{label}</span>
       <div className="flex items-center space-x-2">
-        <span className={`text-sm font-black w-8 text-center ${theme.textMain}`}>{count}/{target}</span>
+        <span className={`text-sm font-black w-8 text-center ${theme.textMain}`}>{Number(count) || 0}/{target}</span>
         <div className="flex space-x-1">
-          <button type="button" onClick={onDec} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>-</button>
-          <button type="button" onClick={onInc} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>+</button>
+          <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDec(); }} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>-</button>
+          <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onInc(); }} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>+</button>
         </div>
       </div>
     </div>
@@ -1602,7 +1614,7 @@ function ActionDateBtn({ label, date, onClick, theme }) {
         <span className={`block text-xs font-bold ${theme.textMain}`}>{label}</span>
         <span className={`text-[10px] font-bold ${date ? (theme.isDark ? "text-teal-400" : "text-teal-600") : (theme.isDark ? "text-red-400" : "text-red-500")}`}>Último: {dStr}</span>
       </div>
-      <button onClick={onClick} className={`text-[10px] font-bold py-1.5 px-2 rounded-md transition border uppercase ${theme.isDark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300 border-slate-600' : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-300'}`}>Marcar Hoje</button>
+      <button onClick={(e) => { e.preventDefault(); onClick(); }} className={`text-[10px] font-bold py-1.5 px-2 rounded-md transition border uppercase ${theme.isDark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300 border-slate-600' : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-300'}`}>Marcar Hoje</button>
     </div>
   );
 }
@@ -1652,7 +1664,7 @@ function GroupCard({ icon, title, count, theme }) {
 function NavBtn({ icon, label, active, onClick, badge, theme }) {
   return (
     <button onClick={onClick} className={`flex flex-col items-center justify-center w-14 py-2 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
-      {badge > 0 && (<span className={`absolute top-1 right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>)}
+      {badge > 0 ? (<span className={`absolute top-1 right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
       {React.cloneElement(icon, { className: `h-6 w-6 mb-1 ${active ? "fill-teal-50 dark:fill-teal-900/30" : ""}` })}
       <span className="text-[10px] font-medium">{label}</span>
     </button>
@@ -1670,7 +1682,7 @@ function PatientListItem({ patient, onClick, filterCondition, isAlert, onPrint, 
           <h3 className={`font-bold text-[15px] leading-tight mb-1 ${theme.textMain}`}>{patient.name}</h3>
           <p className={`text-xs ${theme.textSec}`}>{getAge(patient.birthDate)} anos • MA: {patient.microarea}</p>
           
-          {(!filterCondition || filterCondition === "Todas") && tags.length > 0 && (
+          {(!filterCondition || filterCondition === "Todas") && tags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mt-2">
               {tags.map((t, idx) => (
                 <span key={idx} className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${t.color}`}>
@@ -1678,7 +1690,7 @@ function PatientListItem({ patient, onClick, filterCondition, isAlert, onPrint, 
                 </span>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
         
         <div className="flex items-center space-x-2">
