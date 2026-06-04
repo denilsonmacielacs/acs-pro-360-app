@@ -3,12 +3,12 @@ import {
   Users, BellRing, Search, Home, MapPin, CheckCircle2, AlertCircle, X,
   User, Plus, Check, PieChart, AlertTriangle, Loader2, Sparkles, Bot,
   Pencil, Trash2, Phone, CreditCard, FileText, Printer, Moon, Sun,
-  Settings, KeyRound, Power, ChevronDown, Mic, Notebook, LogOut
+  Settings, KeyRound, Power, ChevronDown, Mic, Notebook, LogOut, CheckSquare
 } from "lucide-react";
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updatePassword } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, 
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager 
@@ -16,41 +16,56 @@ import {
 
 // --- FIREBASE SETUP ---
 let app, adminApp, db, auth, adminAuth;
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBcDVrgdyb62m_k8TcCG0DHIZtRKwwniIU",
-  authDomain: "agenda-acs-pro-360.firebaseapp.com",
-  projectId: "agenda-acs-pro-360",
-  storageBucket: "agenda-acs-pro-360.firebasestorage.app",
-  messagingSenderId: "118241574847",
-  appId: "1:118241574847:web:398ebad006816fbe88ab0a",
-  measurementId: "G-EFDR2G93K6"
-};
-
-try {
-  // Inicializa o App Principal (Para o uso normal do ACS)
-  app = initializeApp(firebaseConfig);
-  // Inicializa um App Secundário (Para o Admin poder criar utilizadores sem ser deslogado)
-  adminApp = initializeApp(firebaseConfig, "AdminApp");
-  
+const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+if (firebaseConfigStr) {
   try {
-    db = initializeFirestore(app, {
-      localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
-    });
-  } catch (cacheErr) {
-    console.warn("Modo offline restrito. A iniciar Firestore padrão.");
-    db = getFirestore(app);
+    const firebaseConfig = JSON.parse(firebaseConfigStr);
+    app = initializeApp(firebaseConfig);
+    adminApp = initializeApp(firebaseConfig, "AdminApp");
+    
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+      });
+    } catch (cacheErr) {
+      console.warn("Modo offline restrito. A iniciar Firestore padrão.");
+      db = getFirestore(app);
+    }
+    
+    auth = getAuth(app);
+    adminAuth = getAuth(adminApp);
+  } catch (e) {
+    console.error("Erro ao inicializar Firebase", e);
   }
-  
-  auth = getAuth(app);
-  adminAuth = getAuth(adminApp);
-} catch (e) {
-  console.error("Erro ao inicializar Firebase", e);
+} else {
+    // FALLBACK PARA DESENVOLVIMENTO (Substitua pelas suas chaves)
+    const firebaseConfig = {
+      apiKey: "AIzaSyDrEkPB1PRlqqZ4vLaSlej6SAU-XeAdDeE",
+      authDomain: "acs-pro-360.firebaseapp.com",
+      databaseURL: "https://acs-pro-360-default-rtdb.firebaseio.com",
+      projectId: "acs-pro-360",
+      storageBucket: "acs-pro-360.firebasestorage.app",
+      messagingSenderId: "440842746827",
+      appId: "1:440842746827:web:f4145c197db749b3c7d44e",
+      measurementId: "G-2S2G3VDDM2"
+    };
+    try {
+        app = initializeApp(firebaseConfig);
+        adminApp = initializeApp(firebaseConfig, "AdminApp");
+        try {
+          db = initializeFirestore(app, {
+            localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+          });
+        } catch (cacheErr) {
+          db = getFirestore(app);
+        }
+        auth = getAuth(app);
+        adminAuth = getAuth(adminApp);
+    } catch (e) {}
 }
-const appId = "acs-pro-360"; 
-const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
+const appId = "acs-pro-360";
 
-// --- GEMINI API SETUP (OFUSCADA POR SEGURANÇA) ---
+// --- GEMINI API SETUP ---
 const _keyParts = ["AQ.Ab8RN6If", "dS9K2ewFkn", "uPeDXRsmnxWEu", "b5RH-N8JDu8VyRljxfQ"];
 const apiKey = _keyParts.join("");
 
@@ -127,7 +142,7 @@ function VoiceBtn({ onResult, theme, small }) {
     <button
       type="button" onClick={startListening}
       className={`absolute ${sizeClass} rounded-full transition-colors flex items-center justify-center z-10 ${isListening ? 'bg-red-500 text-white animate-pulse shadow-md' : (theme.isDark ? 'bg-slate-700 text-slate-300 hover:text-teal-400' : 'bg-gray-100 text-gray-500 hover:text-teal-600')}`}
-      title="Ditar"
+      title="Ditar por voz"
     >
       <Mic className={iconSize} />
     </button>
@@ -146,7 +161,6 @@ const getTodayStr = () => new Date().toISOString().split("T")[0];
 const parseSafeDate = (dStr) => {
   if (!dStr || typeof dStr !== 'string') return null;
   if (dStr.length < 10) return null; 
-  
   const d = new Date(dStr.includes('T') ? dStr : `${dStr}T12:00:00`);
   if (isNaN(d.getTime())) return null;
   if (d.getFullYear() < 1900 || d.getFullYear() > 2100) return null; 
@@ -184,13 +198,13 @@ const evaluateIndicators = (p) => {
   const age = getAge(p.birthDate); const ageMonths = getAgeMonths(p.birthDate); const daysAge = getAgeDays(p.birthDate);
   const rules = []; let hasPending = false; const ind = p.indicators || {};
 
-  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
-  if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Bolsa Família (6m)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
+  const c1Items = [{ label: "Documento (CPF ou CNS)", status: (p.cpf || p.cns) ? "done" : "pending" }, { label: "Cadastro atualizado (12m)", status: getPeriodicStatus(ind.c1_cadastro_att, 12) }];
+  if (p.conditions?.isBolsaFamilia) c1Items.push({ label: "Condicionalidades Bolsa Família (Semestral)", status: getPeriodicStatus(ind.c1_bolsa_familia, 6) });
   let isC1Ok = true; c1Items.forEach((i) => { if (i.status === "pending") { isC1Ok = false; hasPending = true; }});
   rules.push({ id: "C.1", title: "Acesso e Cadastro", icon: "📋", color: "bg-blue-500", isOk: isC1Ok, items: c1Items });
 
   if (ageMonths <= 24) {
-    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
+    const milestones = [{ key: "c2_c15d", t: 30, l: "1ª consulta (até 30d)" }, { key: "c2_c1m", t: 30, l: "1 Mês" }, { key: "c2_c2m", t: 60, l: "2 Meses" }, { key: "c2_c4m", t: 120, l: "4 Meses" }, { key: "c2_c6m", t: 180, l: "6 Meses" }, { key: "c2_c9m", t: 270, l: "9 Meses" }, { key: "c2_c12m", t: 365, l: "12 Meses" }, { key: "c2_c18m", t: 540, l: "18 Meses" }, { key: "c2_c24m", t: 730, l: "24 Meses" }];
     let expected = 0; const mItems = milestones.map((m) => { const isDue = daysAge >= m.t - 15; if (isDue) expected++; return { label: m.l, status: getStatus(!!ind[m.key], isDue) }; });
     const acs1Due = daysAge >= 30 - 15; const acs2Due = daysAge >= 180 - 15; const wDue = expected > 0; const wOk = (ind.c2_weight || 0) >= expected;
     const items = [...mItems, { label: `Reg. peso/altura (${ind.c2_weight || 0}/${expected})`, status: getStatus(wOk, wDue) }, { label: "Visita ACS (Até 30 dias)", status: getStatus(!!ind.c2_acs1, acs1Due) }, { label: "Visita ACS (Até 6 meses)", status: getStatus(!!ind.c2_acs2, acs2Due) }, { label: "Vacinação em dia", status: getStatus(!!ind.c2_vac, true) }];
@@ -241,7 +255,7 @@ const evaluateIndicators = (p) => {
   return { rules, hasPending, daysSinceLastAcsVisit };
 };
 
-// HELPER PARA CORES DAS TAGS DISCRETAS
+// HELPER PARA CORES DAS TAGS DISCRETAS E IMPRESSÃO
 function getPatientTags(patient, theme) {
   const tags = []; const c = patient.conditions || {}; const age = getAge(patient.birthDate); const ageMonths = getAgeMonths(patient.birthDate); const isDark = theme.isDark;
   const addTag = (label, color) => tags.push({ label, color });
@@ -292,7 +306,7 @@ function LoginScreen({ theme, onLogin, error, isLoading }) {
         </div>
         
         {error && (
-          <div className="mb-4 p-3 bg-red-100 border border-red-200 text-red-700 text-sm rounded-xl font-bold text-center">
+          <div className={`mb-4 p-3 border text-sm rounded-xl font-bold text-center ${error.includes('⚠️') ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-red-100 border-red-200 text-red-700'}`}>
             {error}
           </div>
         )}
@@ -350,7 +364,7 @@ export default function App() {
       setAuthUser(user);
       if (user) {
         // Se for o seu email principal, define como master
-        const role = user.email === MASTER_EMAIL ? "master" : "user";
+        const role = user.email === "denilsonmaciel.acs@gmail.com" ? "master" : "user";
         setLoggedInUser({ email: user.email, role: role, uid: user.uid });
       } else {
         setLoggedInUser(null);
@@ -396,7 +410,7 @@ export default function App() {
 
     // Se for master, escuta a coleção de admins para ver todos os clientes
     let unsubAdmin;
-    if (authUser.email === MASTER_EMAIL) {
+    if (authUser.email === "denilsonmaciel.acs@gmail.com") {
        const adminQ = collection(db, 'artifacts', appId, 'admin_users');
        unsubAdmin = onSnapshot(adminQ, (snap) => {
           setAdminUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -429,6 +443,10 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [page, setPage] = useState(1);
   const itemsPerPage = 15;
+  
+  // ESTADOS PARA IMPRESSÃO EM LOTE
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedForPrint, setSelectedForPrint] = useState([]);
 
   const [acsName, setAcsName] = useState(() => safeGetItem("acsName") || "");
   const [ubsfName, setUbsfName] = useState(() => safeGetItem("ubsfName") || "");
@@ -482,7 +500,16 @@ export default function App() {
       await signInWithEmailAndPassword(auth, email, password);
       // Login com sucesso, onAuthStateChanged fará o resto
     } catch (err) {
-      setLoginError("Credenciais inválidas ou e-mail incorreto.");
+      console.error("Erro completo do Firebase no Login:", err);
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setLoginError("Credenciais inválidas ou e-mail incorreto.");
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setLoginError("⚠️ Domínio bloqueado! Vá no painel do Firebase > Authentication > Settings > Authorized Domains e adicione a URL da Vercel.");
+      } else if (err.code === 'auth/too-many-requests') {
+        setLoginError("Muitas tentativas. Sua conta foi temporariamente bloqueada por segurança.");
+      } else {
+        setLoginError(`Falha no login: ${err.message}`);
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -491,6 +518,18 @@ export default function App() {
   const handleLogout = async () => {
     await signOut(auth);
     setShowProfileModal(false);
+  };
+
+  const handleChangePassword = async (newPassword) => {
+    try {
+      await updatePassword(auth.currentUser, newPassword);
+      return { success: true, msg: "✅ Palavra-passe atualizada com sucesso!" };
+    } catch (error) {
+      if (error.code === 'auth/requires-recent-login') {
+        return { success: false, msg: "⚠️ Saia da conta e faça login novamente para alterar a senha." };
+      }
+      return { success: false, msg: "❌ Erro ao alterar a senha: " + error.message };
+    }
   };
 
   const handleUpdatePatientData = async (patientId, updatedData) => {
@@ -600,6 +639,77 @@ export default function App() {
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
   };
 
+  // IMPRESSÃO EM LOTE (BATCH)
+  const handlePrintBatch = () => {
+    const patientsToPrint = patients.filter(p => selectedForPrint.includes(p.id));
+    if (patientsToPrint.length === 0) return;
+
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(s => s.outerHTML).join("");
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed"; iframe.style.width = "0"; iframe.style.height = "0"; iframe.style.border = "0";
+    document.body.appendChild(iframe);
+    const iframeDoc = iframe.contentWindow.document;
+
+    let htmlContent = patientsToPrint.map((patient, index) => {
+        const tags = getPatientTags(patient, theme);
+        const tagsHtml = tags.length > 0 ? tags.map(t => `<span style="display:inline-block; margin:2px; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:bold; background:#e2e8f0; color:#0f172a;">${t.label}</span>`).join('') : "Nenhuma condição específica registrada.";
+        const birthObj = parseSafeDate(patient.birthDate);
+        const birthStr = birthObj ? birthObj.toLocaleDateString('pt-BR') : 'Não informada';
+
+        return `
+          <div style="${index > 0 ? 'page-break-before: always;' : ''}">
+            <div class="header">
+              <h1>${ubsfName || "UBSF - Unidade Básica de Saúde"}</h1>
+              <p><strong>ACS Responsável:</strong> ${acsName || "Não informado"} | <strong>Microárea:</strong> ${patient.microarea}</p>
+            </div>
+            <h2>Ficha do Assistido: ${patient.name}</h2>
+            <div class="grid">
+              <div class="box">
+                <h3>Dados Pessoais</h3>
+                <p><strong>Idade:</strong> ${getAge(patient.birthDate)} anos (${birthStr})</p>
+                <p><strong>Sexo:</strong> ${patient.sex === 'F' ? 'Feminino' : 'Masculino'}</p>
+                <p><strong>CPF:</strong> ${patient.cpf || '-'}</p>
+                <p><strong>CNS:</strong> ${patient.cns || '-'}</p>
+                <p><strong>Telefone:</strong> ${patient.phone || '-'}</p>
+              </div>
+              <div class="box">
+                <h3>Endereço</h3>
+                <p><strong>CEP:</strong> ${patient.cep || '-'}</p>
+                <p><strong>Rua:</strong> ${patient.logradouro || '-'} <strong>Nº:</strong> ${patient.numero || 'S/N'}</p>
+                <p><strong>Bairro:</strong> ${patient.bairro || '-'}</p>
+                <p><strong>Referência:</strong> ${patient.referencia || '-'}</p>
+              </div>
+            </div>
+            <div class="box">
+              <h3>Condições de Saúde e Grupos Automáticos</h3>
+              <div>${tagsHtml}</div>
+            </div>
+          </div>
+        `;
+    }).join('');
+
+    iframeDoc.open();
+    iframeDoc.write(`
+      <!DOCTYPE html><html><head><title>Fichas em Lote</title>${styles}
+      <style>
+        body { font-family: sans-serif; padding: 30px; color: black; background: white; }
+        .header { border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;}
+        .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; }
+        h1, h2, h3 { margin: 0 0 10px 0; }
+        p { margin: 5px 0; font-size: 14px; }
+      </style></head><body>
+        ${htmlContent}
+      </body></html>
+    `);
+    iframeDoc.close();
+    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
+
+    // Fecha o modo de seleção após imprimir
+    setIsSelectionMode(false);
+    setSelectedForPrint([]);
+  };
+
   const handlePrintReport = () => {
     const contentElement = document.getElementById("report-content");
     if (!contentElement) return;
@@ -612,7 +722,8 @@ export default function App() {
     iframeDoc.write(`
       <!DOCTYPE html><html><head><title>Relatório - ACS Pro 360</title>${styles}
       <style>
-        body { background: white !important; margin: 0; padding: 20px; font-family: sans-serif; }
+        @page { size: A4; margin: 10mm; }
+        body { background: white !important; margin: 0; padding: 0; font-family: sans-serif; font-size: 11px; }
         .print\\:hidden { display: none !important; } .hidden.print\\:flex { display: flex !important; }
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
         #report-content * { color: #000 !important; border-color: #ccc !important; }
@@ -622,17 +733,27 @@ export default function App() {
         .bg-rose-500 { background-color: #f43f5e !important; color: white !important; }
         .bg-amber-500 { background-color: #f59e0b !important; color: white !important; }
         .bg-pink-500 { background-color: #ec4899 !important; color: white !important; }
+        
+        /* Ajustes para encaixar em 1 página A4 */
+        .mb-4 { margin-bottom: 0.5rem !important; }
+        .p-4 { padding: 0.5rem !important; }
+        .text-sm { font-size: 10px !important; }
+        .text-xs { font-size: 9px !important; }
+        h2, h3, h4 { margin: 0 0 5px 0 !important; font-size: 12px !important; }
+        .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem !important; }
+        .border { page-break-inside: avoid; break-inside: avoid; }
       </style></head><body>${contentElement.innerHTML}</body></html>
     `);
     iframeDoc.close();
     setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
   };
 
-  // 5. TELA DE LOGIN
+  // 5. TELA DE LOGIN (Mostra se não estiver logado)
   if (!loggedInUser) {
     return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} />;
   }
 
+  // 6. USUÁRIO LOGADO NO APLICATIVO
   const appUser = loggedInUser;
 
   // 7. RENDERIZAÇÃO DO APLICATIVO PRINCIPAL
@@ -699,9 +820,19 @@ export default function App() {
                 <div className="space-y-4 animate-in fade-in pb-8">
                   <div className="flex justify-between items-center mb-3">
                     <h2 className={`${theme.textMain} font-bold`}>Pacientes ({filteredPatients.length})</h2>
-                    <select className={`text-sm rounded-lg px-2 py-1 outline-none shadow-sm border ${theme.input}`} value={filterMicroarea} onChange={(e) => setFilterMicroarea(e.target.value)}>
-                      {microareas.map((m) => <option key={m} value={m}>{m === "Todas" ? "M.A Todas" : `M.A ${m}`}</option>)}
-                    </select>
+                    <div className="flex space-x-2">
+                      {/* BOTÃO DE SELEÇÃO EM LOTE */}
+                      <button 
+                        onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedForPrint([]); }} 
+                        className={`p-2 rounded-lg transition-colors ${isSelectionMode ? 'bg-teal-600 text-white' : (theme.isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-gray-600 border-gray-200')} border shadow-sm`}
+                        title="Imprimir em Lote"
+                      >
+                        <CheckSquare className="w-4 h-4" />
+                      </button>
+                      <select className={`text-sm rounded-lg px-2 py-1 outline-none shadow-sm border ${theme.input}`} value={filterMicroarea} onChange={(e) => setFilterMicroarea(e.target.value)}>
+                        {microareas.map((m) => <option key={m} value={m}>{m === "Todas" ? "M.A Todas" : `M.A ${m}`}</option>)}
+                      </select>
+                    </div>
                   </div>
 
                   {/* BARRA DE FILTROS DESLIZANTE */}
@@ -722,7 +853,18 @@ export default function App() {
                       <p>Nenhum paciente encontrado.</p>
                     </div>
                   ) : (
-                    paginatedPatients.map((p) => <PatientListItem key={p.id} patient={p} theme={theme} onClick={() => setSelectedPatient(p)} filterCondition={filterCondition} onPrint={(e) => handlePrintSingle(e, p)} />)
+                    paginatedPatients.map((p) => (
+                      <PatientListItem 
+                        key={p.id} patient={p} theme={theme} filterCondition={filterCondition} 
+                        isSelectionMode={isSelectionMode}
+                        isSelected={selectedForPrint.includes(p.id)}
+                        onToggleSelect={() => {
+                          setSelectedForPrint(prev => prev.includes(p.id) ? prev.filter(id => id !== p.id) : [...prev, p.id])
+                        }}
+                        onClick={() => setSelectedPatient(p)} 
+                        onPrint={(e) => handlePrintSingle(e, p)} 
+                      />
+                    ))
                   )}
 
                   {/* Botão de Paginação UI */}
@@ -736,12 +878,12 @@ export default function App() {
 
               {currentTab === "search_active" && (
                 <div className="space-y-4 animate-in fade-in">
-                  <div className={`${isDarkMode ? 'bg-red-900/20 border-red-900/50' : 'bg-red-50 border-red-100'} p-4 rounded-2xl border mb-6`}>
-                    <div className={`flex items-center space-x-2 mb-2 ${isDarkMode ? 'text-red-400' : 'text-red-700'}`}><AlertTriangle className="h-5 w-5" /><h2 className="font-bold">Ação Necessária</h2></div>
-                    <p className={`text-xs ${isDarkMode ? 'text-red-300' : 'text-red-600'}`}>Pacientes atrasados ou com indicadores vencendo em até 15 dias.</p>
+                  <div className={`${theme.isDark ? 'bg-red-900/20 border-red-900/50' : 'bg-red-50 border-red-100'} p-4 rounded-2xl border mb-6`}>
+                    <div className={`flex items-center space-x-2 mb-2 ${theme.isDark ? 'text-red-400' : 'text-red-700'}`}><AlertTriangle className="h-5 w-5" /><h2 className="font-bold">Ação Necessária</h2></div>
+                    <p className={`text-xs ${theme.isDark ? 'text-red-300' : 'text-red-600'}`}>Pacientes atrasados ou com indicadores vencendo em até 15 dias.</p>
                   </div>
                   {activeSearchPatients.length === 0 ? (
-                    <div className={`text-center py-10 rounded-2xl border ${isDarkMode ? 'bg-emerald-900/20 border-emerald-900/50 text-emerald-400' : 'text-emerald-600 bg-emerald-50 border-emerald-100'}`}>
+                    <div className={`text-center py-10 rounded-2xl border ${theme.isDark ? 'bg-emerald-900/20 border-emerald-900/50 text-emerald-400' : 'text-emerald-600 bg-emerald-50 border-emerald-100'}`}>
                       <CheckCircle2 className="w-12 h-12 mx-auto mb-2" /><p className="font-bold">Tudo em dia!</p>
                     </div>
                   ) : activeSearchPatients.map((p) => <PatientListItem key={p.id} patient={p} theme={theme} onClick={() => setSelectedPatient(p)} isAlert onPrint={(e) => handlePrintSingle(e, p)} />)}
@@ -773,24 +915,24 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className={`${isDarkMode ? 'bg-blue-900/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'} p-4 rounded-2xl border mb-4 flex items-center justify-between print:hidden`}>
+                  <div className={`${theme.isDark ? 'bg-blue-900/20 border-blue-900/50' : 'bg-blue-50 border-blue-100'} p-4 rounded-2xl border mb-4 flex items-center justify-between print:hidden`}>
                     <div className="flex items-center">
-                      <PieChart className={`h-8 w-8 mr-3 ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
+                      <PieChart className={`h-8 w-8 mr-3 ${theme.isDark ? 'text-blue-400' : 'text-blue-600'}`} />
                       <div>
-                        <h2 className={`font-bold text-xl ${isDarkMode ? 'text-blue-300' : 'text-blue-800'}`}>Relatório Mensal de Metas</h2>
-                        <p className={`text-xs ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}>Situação atual da {filterMicroarea === "Todas" ? "equipe" : `MA ${filterMicroarea}`}</p>
+                        <h2 className={`font-bold text-xl ${theme.isDark ? 'text-blue-300' : 'text-blue-800'}`}>Relatório Mensal de Metas</h2>
+                        <p className={`text-xs ${theme.isDark ? 'text-blue-400' : 'text-blue-600'}`}>Situação atual da {filterMicroarea === "Todas" ? "equipe" : `MA ${filterMicroarea}`}</p>
                       </div>
                     </div>
-                    <button onClick={handlePrintReport} className={`print:hidden flex items-center justify-center border px-3 py-2 rounded-xl text-sm font-bold transition shadow-sm ${isDarkMode ? 'bg-slate-800 border-slate-600 text-blue-400 hover:bg-slate-700' : 'bg-white border-blue-200 text-blue-600 hover:bg-blue-100'}`}><Printer className="w-4 h-4 mr-2" /> Imprimir</button>
+                    <button onClick={handlePrintReport} className={`print:hidden flex items-center justify-center border px-3 py-2 rounded-xl text-sm font-bold transition shadow-sm ${theme.isDark ? 'bg-slate-800 border-slate-600 text-blue-400 hover:bg-slate-700' : 'bg-white border-blue-200 text-blue-600 hover:bg-blue-100'}`}><Printer className="w-4 h-4 mr-2" /> Imprimir</button>
                   </div>
 
-                  <ReportSection theme={theme} title="C.1 Acesso e Cadastro" icon="📋" patients={reportPatients} ruleId="C.1" color={isDarkMode ? "bg-blue-900" : "bg-blue-50"} textColor={isDarkMode ? "text-blue-400" : "text-blue-700"} />
-                  <ReportSection theme={theme} title="C.2 Infantil (<2 anos)" icon="👶" patients={reportPatients.filter((p) => getAgeMonths(p.birthDate) <= 24)} ruleId="C.2" color={isDarkMode ? "bg-emerald-900" : "bg-emerald-50"} textColor={isDarkMode ? "text-emerald-400" : "text-emerald-700"} />
-                  <ReportSection theme={theme} title="C.3 Gestação" icon="🤰" patients={reportPatients.filter((p) => p.conditions?.isGestante)} ruleId="C.3" color={isDarkMode ? "bg-purple-900" : "bg-purple-50"} textColor={isDarkMode ? "text-purple-400" : "text-purple-700"} />
-                  <ReportSection theme={theme} title="C.4 Diabetes" icon="🩸" patients={reportPatients.filter((p) => p.conditions?.isDM)} ruleId="C.4" color={isDarkMode ? "bg-red-900" : "bg-red-50"} textColor={isDarkMode ? "text-red-400" : "text-red-700"} />
-                  <ReportSection theme={theme} title="C.5 Hipertensão" icon="❤️" patients={reportPatients.filter((p) => p.conditions?.isHA)} ruleId="C.5" color={isDarkMode ? "bg-rose-900" : "bg-rose-50"} textColor={isDarkMode ? "text-rose-400" : "text-rose-700"} />
-                  <ReportSection theme={theme} title="C.6 Idoso (>60)" icon="👵" patients={reportPatients.filter((p) => getAge(p.birthDate) >= 60)} ruleId="C.6" color={isDarkMode ? "bg-amber-900" : "bg-amber-50"} textColor={isDarkMode ? "text-amber-400" : "text-amber-700"} />
-                  <ReportSection theme={theme} title="C.7 Saúde da Mulher" icon="🎗️" patients={reportPatients.filter((p) => p.sex === "F" && getAge(p.birthDate) >= 25 && getAge(p.birthDate) <= 64)} ruleId="C.7" color={isDarkMode ? "bg-pink-900" : "bg-pink-50"} textColor={isDarkMode ? "text-pink-400" : "text-pink-700"} />
+                  <ReportSection theme={theme} title="C.1 Acesso e Cadastro" icon="📋" patients={reportPatients} ruleId="C.1" color={theme.isDark ? "bg-blue-900" : "bg-blue-50"} textColor={theme.isDark ? "text-blue-400" : "text-blue-700"} />
+                  <ReportSection theme={theme} title="C.2 Infantil (<2 anos)" icon="👶" patients={reportPatients.filter((p) => getAgeMonths(p.birthDate) <= 24)} ruleId="C.2" color={theme.isDark ? "bg-emerald-900" : "bg-emerald-50"} textColor={theme.isDark ? "text-emerald-400" : "text-emerald-700"} />
+                  <ReportSection theme={theme} title="C.3 Gestação" icon="🤰" patients={reportPatients.filter((p) => p.conditions?.isGestante)} ruleId="C.3" color={theme.isDark ? "bg-purple-900" : "bg-purple-50"} textColor={theme.isDark ? "text-purple-400" : "text-purple-700"} />
+                  <ReportSection theme={theme} title="C.4 Diabetes" icon="🩸" patients={reportPatients.filter((p) => p.conditions?.isDM)} ruleId="C.4" color={theme.isDark ? "bg-red-900" : "bg-red-50"} textColor={theme.isDark ? "text-red-400" : "text-red-700"} />
+                  <ReportSection theme={theme} title="C.5 Hipertensão" icon="❤️" patients={reportPatients.filter((p) => p.conditions?.isHA)} ruleId="C.5" color={theme.isDark ? "bg-rose-900" : "bg-rose-50"} textColor={theme.isDark ? "text-rose-400" : "text-rose-700"} />
+                  <ReportSection theme={theme} title="C.6 Idoso (>60)" icon="👵" patients={reportPatients.filter((p) => getAge(p.birthDate) >= 60)} ruleId="C.6" color={theme.isDark ? "bg-amber-900" : "bg-amber-50"} textColor={theme.isDark ? "text-amber-400" : "text-amber-700"} />
+                  <ReportSection theme={theme} title="C.7 Saúde da Mulher" icon="🎗️" patients={reportPatients.filter((p) => p.sex === "F" && getAge(p.birthDate) >= 25 && getAge(p.birthDate) <= 64)} ruleId="C.7" color={theme.isDark ? "bg-pink-900" : "bg-pink-50"} textColor={theme.isDark ? "text-pink-400" : "text-pink-700"} />
                 </div>
               )}
 
@@ -799,19 +941,30 @@ export default function App() {
               {currentTab === "admin" && appUser.role === "master" && (
                 <AdminPanel 
                   theme={theme} 
-                  db={db}
-                  adminUsers={adminUsers}
                   adminAuth={adminAuth}
+                  db={db}
                 />
               )}
             </>
           )}
+
+          {/* FLOAT BAR DE IMPRESSÃO EM LOTE */}
+          {isSelectionMode && currentTab === "list" && (
+            <div className={`fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-teal-600 text-white px-5 py-3 rounded-full shadow-2xl z-40 flex items-center space-x-3 w-11/12 max-w-sm justify-between animate-in slide-in-from-bottom-5`}>
+              <span className="font-bold text-sm ml-2">{selectedForPrint.length} ficha(s)</span>
+              <div className="flex space-x-2">
+                <button onClick={() => { setIsSelectionMode(false); setSelectedForPrint([]); }} className="p-2 bg-teal-700 rounded-full hover:bg-teal-800 transition"><X className="w-4 h-4" /></button>
+                <button onClick={handlePrintBatch} disabled={selectedForPrint.length === 0} className="flex items-center px-4 py-2 bg-white text-teal-700 rounded-full text-xs font-bold disabled:opacity-50 transition active:scale-95"><Printer className="w-4 h-4 mr-2"/> Imprimir Lote</button>
+              </div>
+            </div>
+          )}
+
         </main>
 
-        <nav className={`absolute bottom-0 w-full ${theme.nav} border-t flex justify-between px-4 pb-safe shadow-[0_-5px_15px_-10px_rgba(0,0,0,0.1)] z-20 rounded-t-2xl print:hidden`}>
+        <nav className={`absolute bottom-0 w-full ${theme.nav} border-t flex justify-between px-2 sm:px-4 pt-2 pb-3 shadow-[0_-5px_15px_-10px_rgba(0,0,0,0.1)] z-20 rounded-t-2xl print:hidden`}>
           <NavBtn theme={theme} icon={<Home />} label="Início" active={currentTab === "home"} onClick={() => setCurrentTab("home")} />
           <NavBtn theme={theme} icon={<Users />} label="Pacientes" active={currentTab === "list"} onClick={() => setCurrentTab("list")} />
-          <div className="-mt-6 flex-shrink-0">
+          <div className="-mt-6 flex-shrink-0 px-2">
             <button onClick={() => setCurrentTab("add")} className="bg-gradient-to-tr from-teal-500 to-blue-600 text-white p-4 rounded-full shadow-lg border-4 border-transparent dark:border-slate-800 transform transition active:scale-95"><Plus className="h-6 w-6" /></button>
           </div>
           <NavBtn theme={theme} icon={<PieChart />} label="Relatórios" active={currentTab === "reports"} onClick={() => setCurrentTab("reports")} />
@@ -823,54 +976,53 @@ export default function App() {
         </nav>
 
         {selectedPatient && <PatientDetailsModal patient={selectedPatient} theme={theme} onClose={() => setSelectedPatient(null)} onRegisterVisit={handleRegisterVisit} onUpdateData={handleUpdatePatientData} onDelete={handleDeletePatient} />}
-        {showProfileModal && <UserProfileModal user={appUser} theme={theme} onClose={() => setShowProfileModal(false)} onLogout={handleLogout} />}
+        {showProfileModal && <UserProfileModal user={appUser} theme={theme} onClose={() => setShowProfileModal(false)} onLogout={handleLogout} onChangePassword={handleChangePassword} />}
       </div>
     </div>
   );
 }
 
 // --- ADMIN PANEL COM CRIAÇÃO NO FIREBASE ---
-function AdminPanel({ theme, db, adminUsers, adminAuth }) {
+function AdminPanel({ theme, db, adminAuth }) {
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [msg, setMsg] = useState("");
+  const [adminUsersList, setAdminUsersList] = useState([]);
+
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'artifacts', 'acs-pro-360', 'admin_users'), snap => {
+      setAdminUsersList(snap.docs.map(d => ({id: d.id, ...d.data()})));
+    });
+    return () => unsub();
+  }, [db]);
 
   const handleAddUser = async (e) => {
     e.preventDefault();
     if (!newEmail || !newPassword) return;
-    setIsCreating(true);
-    setMsg("");
+    setIsCreating(true); setMsg("");
     try {
-      // 1. Cria o user no Firebase usando a App secundária (Não desloga o admin)
-      const userCredential = await createUserWithEmailAndPassword(adminAuth, newEmail, newPassword);
-      // 2. Registra no Firestore para gerir na lista
-      await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', userCredential.user.uid), {
-        email: newEmail.toLowerCase(),
-        createdAt: getTodayStr(),
-        active: true
+      const cred = await createUserWithEmailAndPassword(adminAuth, newEmail, newPassword);
+      await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', cred.user.uid), {
+        email: newEmail.toLowerCase(), role: 'user', active: true, createdAt: getTodayStr()
       });
-      // 3. Desloga a app secundária para limpar a memória
       await signOut(adminAuth);
-      
       setMsg("✅ Conta de cliente criada com sucesso!");
-      setNewEmail("");
-      setNewPassword("");
-    } catch (err) {
-      setMsg(`❌ Erro: ${err.message}`);
-    } finally {
-      setIsCreating(false);
-    }
+      setNewEmail(""); setNewPassword("");
+    } catch (err) { setMsg(`❌ Erro: ${err.message}`); } finally { setIsCreating(false); }
+  };
+
+  const handleToggleAccess = async (uid, currentStatus) => {
+    try { await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', uid), { active: !currentStatus }, { merge: true }); } catch(e){}
   };
 
   return (
     <div className="space-y-6 animate-in fade-in pb-10">
       <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-5 rounded-2xl shadow-md text-white border border-slate-700">
         <h2 className="font-black text-lg flex items-center mb-1"><KeyRound className="w-5 h-5 mr-2 text-teal-400" /> Venda de Acessos</h2>
-        <p className="text-xs text-slate-400 mb-4">Cria contas blindadas e isoladas para os seus clientes. O Firebase fará a gestão da segurança e da palavra-passe.</p>
-        
+        <p className="text-xs text-slate-400 mb-4">Cria contas blindadas e isoladas no servidor.</p>
         {msg && <div className="mb-3 text-xs font-bold p-2 bg-slate-800 rounded-lg">{msg}</div>}
-
         <form onSubmit={handleAddUser} className="mt-4 space-y-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
           <input type="email" required placeholder="E-mail do cliente" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white outline-none focus:border-teal-500" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
           <input type="text" required placeholder="Crie uma palavra-passe" className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-white outline-none focus:border-teal-500" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
@@ -881,24 +1033,25 @@ function AdminPanel({ theme, db, adminUsers, adminAuth }) {
       </div>
 
       <div className="space-y-3">
-        <h3 className={`font-bold text-sm ${theme.textMain}`}>Clientes Ativos ({adminUsers.length})</h3>
-        {adminUsers.length === 0 && <p className={`text-xs ${theme.textSec}`}>Nenhuma conta criada pelo painel ainda.</p>}
-        {adminUsers.map((u) => (
-          <div key={u.id} className={`${theme.card} p-4 rounded-xl shadow-sm border`}>
+        <h3 className={`font-bold text-sm ${theme.textMain}`}>Clientes Ativos ({adminUsersList.length})</h3>
+        {adminUsersList.length === 0 && <p className={`text-xs ${theme.textSec}`}>Nenhuma conta criada pelo painel ainda.</p>}
+        {adminUsersList.map((u) => (
+          <div key={u.id} className={`${theme.card} p-4 rounded-xl shadow-sm border ${u.active ? "" : (theme.isDark ? "border-red-900/50 bg-red-900/10" : "border-red-200 bg-red-50")}`}>
             <div className="flex justify-between items-center">
               <div>
                 <p className={`font-bold text-sm ${theme.textMain}`}>{u.email}</p>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded mt-1 inline-block ${theme.isDark ? "bg-emerald-900/40 text-emerald-400" : "bg-emerald-100 text-emerald-700"}`}>
-                  ATIVO
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded mt-1 inline-block ${u.active ? (theme.isDark ? "bg-emerald-900/40 text-emerald-400" : "bg-emerald-100 text-emerald-700") : (theme.isDark ? "bg-red-900/40 text-red-400" : "bg-red-100 text-red-700")}`}>
+                  {u.active ? "LIBERADO" : "BLOQUEADO"}
                 </span>
-                <p className={`text-[10px] mt-1 ${theme.textSec}`}>ID: {u.id}</p>
               </div>
+              {u.role !== "master" && (
+                <button onClick={() => handleToggleAccess(u.id, u.active)} className={`p-2 rounded-lg transition-colors ${u.active ? (theme.isDark ? "bg-red-900/30 text-red-400 hover:bg-red-900/50" : "bg-red-100 text-red-600 hover:bg-red-200") : (theme.isDark ? "bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50" : "bg-emerald-100 text-emerald-600 hover:bg-emerald-200")}`}>
+                  <Power className="w-5 h-5" />
+                </button>
+              )}
             </div>
           </div>
         ))}
-        <div className={`p-4 rounded-xl text-xs mt-4 border ${theme.isDark ? 'bg-blue-900/20 border-blue-900/50 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-          <strong>Nota de Segurança:</strong> Para apagar permanentemente um cliente ou trocar a palavra-passe esquecida, aceda ao painel oficial do <b>Firebase Authentication</b>.
-        </div>
       </div>
     </div>
   );
@@ -935,7 +1088,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
     - Nome: ${patient.name}, ${age} anos.
     - Condições/Marcadores: ${tagsString || "Geral"}.
     - Pendências: ${pendingItems || "Rotina."}
-    Dê dicas curtas: 1. Empatia ao abordar. 2. Como convencer a resolver as pendências.`;
+    Dê dicas curtas: 1. Empatia ao abordar. 2. Como convencer a solucionar as pendências.`;
 
     try { 
       const result = await generateAiBriefing(prompt);
@@ -1002,19 +1155,19 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                 <h4 className={`font-bold text-sm mb-3 ${theme.textMain}`}>Informações Pessoais</h4>
                 <div className="space-y-2">
                   <div className={`flex items-center text-sm ${theme.textSec}`}><CreditCard className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>CPF:</span> {patient.cpf || "-"}</div>
-                  <div className={`flex items-center text-sm ${theme.textSec}`}><FileText className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>CNS:</span> {patient.cns || "-"}</div>
+                  <div className={`flex items-center text-sm ${theme.textSec}`}><FileText className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>CNS (Cartão SUS):</span> {patient.cns || "-"}</div>
                   <div className={`flex items-center text-sm ${theme.textSec}`}><Phone className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>Contato:</span> {patient.phone || "-"}</div>
                   <div className={`flex items-start text-sm ${theme.textSec}`}><MapPin className="w-4 h-4 mr-2 text-teal-600 mt-0.5 flex-shrink-0" /><div><span className={`font-bold ${theme.textMain}`}>Endereço:</span><br />{patient.logradouro ? `${patient.logradouro}, ${patient.numero || "S/N"} - ${patient.bairro || ""}` : patient.address || "-"}<br /><span className={`text-xs ${theme.isDark ? 'text-slate-500' : 'text-gray-400'}`}>{patient.referencia ? `Ref: ${patient.referencia}` : ""}</span></div></div>
                 </div>
 
-                {tags.length > 0 ? (
+                {tags.length > 0 && (
                   <div className={`mt-3 pt-3 border-t ${theme.isDark ? 'border-slate-800' : 'border-gray-100'}`}>
                     <span className={`block text-[10px] font-bold mb-2 uppercase tracking-wider ${theme.textSec}`}>Condições e Marcadores</span>
                     <div className="flex flex-wrap gap-1.5">
                       {tags.map((t, idx) => <span key={idx} className={`px-2 py-1 rounded-md text-[10px] font-bold border ${t.color}`}>{t.label}</span>)}
                     </div>
                   </div>
-                ) : null}
+                )}
               </div>
 
               {!aiInsight && !isAiLoading && (
@@ -1054,17 +1207,17 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
             </div>
           ) : (
             <div className="space-y-4 animate-in fade-in pb-10">
-              <h3 className={`font-black text-lg mb-2 ${theme.textMain}`}>Atualizar Indicadores</h3>
+              <h3 className={`font-black text-lg mb-2 ${theme.textMain}`}>Atualizar Ficha Médica</h3>
               <p className={`text-sm mb-4 ${theme.textSec}`}>Marque apenas o que foi realizado hoje.</p>
 
               <FormGroup theme={theme} title="C.1 Acesso e Cadastro" color="blue">
                 <div className="space-y-2">
-                  <ActionDateBtn theme={theme} label="Atualização Cadastral do Indivíduo" date={fU.c1_cadastro_att} onClick={() => setDate("c1_cadastro_att")} />
+                  <ActionDateBtn theme={theme} label="Atualização de Cadastro" date={fU.c1_cadastro_att} onClick={() => setDate("c1_cadastro_att")} />
                   {conditions?.isBolsaFamilia && <ActionDateBtn theme={theme} label="Acompanhamento Bolsa Família" date={fU.c1_bolsa_familia} onClick={() => setDate("c1_bolsa_familia")} />}
                 </div>
               </FormGroup>
 
-              {getAgeMonths(patient.birthDate) <= 24 && (
+              {ageMonths <= 24 && (
                 <FormGroup theme={theme} title="C.2 Desenvolvimento Infantil" color="emerald">
                   <div className="mb-3"><p className={`text-xs font-bold mb-2 ${theme.textSec}`}>Consultas:</p>
                     <div className="grid grid-cols-2 gap-2"><CheckboxBtn theme={theme} label="1ª (até 30d)" checked={fU.c2_c15d} onClick={() => toggleVal("c2_c15d")} /><CheckboxBtn theme={theme} label="1 Mês" checked={fU.c2_c1m} onClick={() => toggleVal("c2_c1m")} /><CheckboxBtn theme={theme} label="2 Meses" checked={fU.c2_c2m} onClick={() => toggleVal("c2_c2m")} /><CheckboxBtn theme={theme} label="4 Meses" checked={fU.c2_c4m} onClick={() => toggleVal("c2_c4m")} /><CheckboxBtn theme={theme} label="6 Meses" checked={fU.c2_c6m} onClick={() => toggleVal("c2_c6m")} /><CheckboxBtn theme={theme} label="9 Meses" checked={fU.c2_c9m} onClick={() => toggleVal("c2_c9m")} /><CheckboxBtn theme={theme} label="12 Meses" checked={fU.c2_c12m} onClick={() => toggleVal("c2_c12m")} /><CheckboxBtn theme={theme} label="18 Meses" checked={fU.c2_c18m} onClick={() => toggleVal("c2_c18m")} /><CheckboxBtn theme={theme} label="24 Meses" checked={fU.c2_c24m} onClick={() => toggleVal("c2_c24m")} /></div>
@@ -1195,7 +1348,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
   });
 
   const [newTagInput, setNewTagInput] = useState("");
-  const ageMonths = getAgeMonths(f.birthDate);
+  const ageMonths = f.birthDate ? getAgeMonths(f.birthDate) : 999;
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -1271,7 +1424,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
             </div>
           </div>
           <div>
-            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>CNS</label>
+            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>CNS (Cartão SUS)</label>
             <div className="relative">
               <input type="text" className={`w-full border rounded-xl p-3 pr-10 outline-none focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={f.cns} onChange={(e) => setF({ ...f, cns: e.target.value })} placeholder="Apenas números" />
               <VoiceBtn theme={theme} onResult={(t) => handleDictation('cns', t)} />
@@ -1330,7 +1483,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
             </div>
           </div>
           <div>
-            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>Complemento / Referência</label>
+            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>Referência / Complemento</label>
             <div className="relative">
               <input type="text" className={`w-full border rounded-xl p-3 pr-10 outline-none focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={f.referencia} onChange={(e) => setF({ ...f, referencia: e.target.value })} placeholder="Ex: Próximo à padaria" />
               <VoiceBtn theme={theme} onResult={(t) => handleDictation('referencia', t)} />
@@ -1533,7 +1686,20 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
   );
 }
 
-function UserProfileModal({ user, theme, onClose, onLogout }) {
+function UserProfileModal({ user, theme, onClose, onLogout, onChangePassword }) {
+  const [newPwd, setNewPwd] = useState("");
+  const [msg, setMsg] = useState("");
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleUpdate = async () => {
+    if (newPwd.length < 6) { setMsg("A senha deve ter no mínimo 6 caracteres."); return; }
+    setIsUpdating(true);
+    const res = await onChangePassword(newPwd);
+    setMsg(res.msg);
+    if(res.success) setNewPwd("");
+    setIsUpdating(false);
+  };
+
   return (
     <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className={`${theme.card} rounded-3xl p-6 w-full max-w-sm animate-in zoom-in-95 shadow-2xl relative`}>
@@ -1549,6 +1715,17 @@ function UserProfileModal({ user, theme, onClose, onLogout }) {
           <span className={`mt-2 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${theme.isDark ? 'bg-slate-800 text-slate-300' : 'bg-gray-100 text-gray-600'}`}>
             Conta {user.role === 'master' ? 'Administrador' : 'Agente'}
           </span>
+        </div>
+
+        <div className={`mb-6 pt-4 border-t ${theme.divider}`}>
+          <label className={`block text-xs font-bold mb-2 ${theme.textSec}`}>Alterar Senha Pessoal</label>
+          {msg && <div className={`mb-3 text-[10px] font-bold p-2 rounded-lg ${msg.includes('✅') ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{msg}</div>}
+          <div className="flex space-x-2">
+            <input type="text" placeholder="Nova senha" className={`flex-1 rounded-xl p-2.5 text-sm outline-none border focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
+            <button onClick={handleUpdate} disabled={isUpdating} className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition">
+              {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
         
         <button onClick={onLogout} className={`w-full py-3.5 rounded-xl font-bold flex items-center justify-center transition-colors shadow-sm ${theme.isDark ? 'bg-red-900/20 text-red-400 border border-red-900/50 hover:bg-red-900/40' : 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100'}`}>
@@ -1591,11 +1768,12 @@ function CheckboxBtn({ label, checked, onClick, block, theme }) {
 }
 
 function CounterBtn({ label, count, onInc, onDec, target, theme }) {
+  const displayCount = count !== undefined && count !== null ? count : 0;
   return (
     <div className={`flex justify-between items-center p-3 rounded-lg border ${theme.card}`}>
       <span className={`text-xs font-bold ${theme.textMain}`}>{label}</span>
       <div className="flex items-center space-x-2">
-        <span className={`text-sm font-black w-8 text-center ${theme.textMain}`}>{Number(count) || 0}/{target}</span>
+        <span className={`text-sm font-black w-8 text-center ${theme.textMain}`}>{displayCount}/{target}</span>
         <div className="flex space-x-1">
           <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDec(); }} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>-</button>
           <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onInc(); }} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>+</button>
@@ -1663,22 +1841,31 @@ function GroupCard({ icon, title, count, theme }) {
 
 function NavBtn({ icon, label, active, onClick, badge, theme }) {
   return (
-    <button onClick={onClick} className={`flex flex-col items-center justify-center w-14 py-2 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
-      {badge > 0 ? (<span className={`absolute top-1 right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
+    <button onClick={onClick} className={`flex-1 flex flex-col items-center justify-center py-1 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
+      {badge > 0 ? (<span className={`absolute top-0 right-1/4 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
       {React.cloneElement(icon, { className: `h-6 w-6 mb-1 ${active ? "fill-teal-50 dark:fill-teal-900/30" : ""}` })}
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-[9px] sm:text-[10px] font-bold whitespace-nowrap">{label}</span>
     </button>
   );
 }
 
-function PatientListItem({ patient, onClick, filterCondition, isAlert, onPrint, theme }) {
+function PatientListItem({ patient, onClick, filterCondition, isAlert, onPrint, isSelectionMode, isSelected, onToggleSelect, theme }) {
   const { evaluation } = patient;
   const tags = getPatientTags(patient, theme);
 
   return (
-    <div onClick={onClick} className={`${theme.card} rounded-2xl p-4 shadow-sm border cursor-pointer relative transition-all hover:shadow-md ${isAlert ? (theme.isDark ? "border-l-4 border-l-red-500" : "border-red-200 border-l-4 border-l-red-500") : (theme.isDark ? "border-l-4 border-l-teal-500" : "border-gray-100 border-l-4 border-l-teal-500")}`}>
+    <div className={`${theme.card} rounded-2xl p-4 shadow-sm border relative transition-all hover:shadow-md ${isAlert ? (theme.isDark ? "border-l-4 border-l-red-500" : "border-red-200 border-l-4 border-l-red-500") : (theme.isDark ? "border-l-4 border-l-teal-500" : "border-gray-100 border-l-4 border-l-teal-500")} ${isSelected ? 'ring-2 ring-teal-500' : ''}`}>
       <div className="flex justify-between items-start">
-        <div className="flex-1 pr-2">
+        {/* CHECKBOX DE SELEÇÃO */}
+        {isSelectionMode && (
+          <div className="mr-3 mt-1" onClick={onToggleSelect}>
+             <div className={`w-5 h-5 rounded border flex items-center justify-center cursor-pointer ${isSelected ? 'bg-teal-600 border-teal-600' : (theme.isDark ? 'border-slate-600' : 'border-gray-300')}`}>
+               {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
+             </div>
+          </div>
+        )}
+
+        <div className="flex-1 pr-2 cursor-pointer" onClick={isSelectionMode ? onToggleSelect : onClick}>
           <h3 className={`font-bold text-[15px] leading-tight mb-1 ${theme.textMain}`}>{patient.name}</h3>
           <p className={`text-xs ${theme.textSec}`}>{getAge(patient.birthDate)} anos • MA: {patient.microarea}</p>
           
@@ -1694,7 +1881,7 @@ function PatientListItem({ patient, onClick, filterCondition, isAlert, onPrint, 
         </div>
         
         <div className="flex items-center space-x-2">
-          {onPrint && (
+          {onPrint && !isSelectionMode && (
             <button onClick={onPrint} title="Imprimir Ficha" className={`p-1.5 rounded-lg transition-colors ${theme.isDark ? "text-blue-400 hover:bg-blue-900/40" : "text-blue-600 hover:bg-blue-50"}`}>
               <Notebook className="w-5 h-5" />
             </button>
