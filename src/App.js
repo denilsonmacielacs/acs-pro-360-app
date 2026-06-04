@@ -961,10 +961,10 @@ export default function App() {
 
         </main>
 
-        <nav className={`absolute bottom-0 w-full ${theme.nav} border-t flex justify-between px-4 pb-safe shadow-[0_-5px_15px_-10px_rgba(0,0,0,0.1)] z-20 rounded-t-2xl print:hidden`}>
+        <nav className={`absolute bottom-0 w-full ${theme.nav} border-t flex justify-between px-2 sm:px-4 pt-2 pb-3 shadow-[0_-5px_15px_-10px_rgba(0,0,0,0.1)] z-20 rounded-t-2xl print:hidden`}>
           <NavBtn theme={theme} icon={<Home />} label="Início" active={currentTab === "home"} onClick={() => setCurrentTab("home")} />
           <NavBtn theme={theme} icon={<Users />} label="Pacientes" active={currentTab === "list"} onClick={() => setCurrentTab("list")} />
-          <div className="-mt-6 flex-shrink-0">
+          <div className="-mt-6 flex-shrink-0 px-2">
             <button onClick={() => setCurrentTab("add")} className="bg-gradient-to-tr from-teal-500 to-blue-600 text-white p-4 rounded-full shadow-lg border-4 border-transparent dark:border-slate-800 transform transition active:scale-95"><Plus className="h-6 w-6" /></button>
           </div>
           <NavBtn theme={theme} icon={<PieChart />} label="Relatórios" active={currentTab === "reports"} onClick={() => setCurrentTab("reports")} />
@@ -1088,7 +1088,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
     - Nome: ${patient.name}, ${age} anos.
     - Condições/Marcadores: ${tagsString || "Geral"}.
     - Pendências: ${pendingItems || "Rotina."}
-    Dê dicas curtas: 1. Empatia ao abordar. 2. Como convencer a resolver as pendências.`;
+    Dê dicas curtas: 1. Empatia ao abordar. 2. Como convencer a solucionar as pendências.`;
 
     try { 
       const result = await generateAiBriefing(prompt);
@@ -1155,7 +1155,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                 <h4 className={`font-bold text-sm mb-3 ${theme.textMain}`}>Informações Pessoais</h4>
                 <div className="space-y-2">
                   <div className={`flex items-center text-sm ${theme.textSec}`}><CreditCard className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>CPF:</span> {patient.cpf || "-"}</div>
-                  <div className={`flex items-center text-sm ${theme.textSec}`}><FileText className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>CNS:</span> {patient.cns || "-"}</div>
+                  <div className={`flex items-center text-sm ${theme.textSec}`}><FileText className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>CNS (Cartão SUS):</span> {patient.cns || "-"}</div>
                   <div className={`flex items-center text-sm ${theme.textSec}`}><Phone className="w-4 h-4 mr-2 text-teal-600 flex-shrink-0" /> <span className={`font-bold mr-1 ${theme.textMain}`}>Contato:</span> {patient.phone || "-"}</div>
                   <div className={`flex items-start text-sm ${theme.textSec}`}><MapPin className="w-4 h-4 mr-2 text-teal-600 mt-0.5 flex-shrink-0" /><div><span className={`font-bold ${theme.textMain}`}>Endereço:</span><br />{patient.logradouro ? `${patient.logradouro}, ${patient.numero || "S/N"} - ${patient.bairro || ""}` : patient.address || "-"}<br /><span className={`text-xs ${theme.isDark ? 'text-slate-500' : 'text-gray-400'}`}>{patient.referencia ? `Ref: ${patient.referencia}` : ""}</span></div></div>
                 </div>
@@ -1207,12 +1207,12 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
             </div>
           ) : (
             <div className="space-y-4 animate-in fade-in pb-10">
-              <h3 className={`font-black text-lg mb-2 ${theme.textMain}`}>Atualizar Indicadores</h3>
+              <h3 className={`font-black text-lg mb-2 ${theme.textMain}`}>Atualizar Ficha Médica</h3>
               <p className={`text-sm mb-4 ${theme.textSec}`}>Marque apenas o que foi realizado hoje.</p>
 
               <FormGroup theme={theme} title="C.1 Acesso e Cadastro" color="blue">
                 <div className="space-y-2">
-                  <ActionDateBtn theme={theme} label="Atualização Cadastral do Indivíduo" date={fU.c1_cadastro_att} onClick={() => setDate("c1_cadastro_att")} />
+                  <ActionDateBtn theme={theme} label="Atualização de Cadastro" date={fU.c1_cadastro_att} onClick={() => setDate("c1_cadastro_att")} />
                   {conditions?.isBolsaFamilia && <ActionDateBtn theme={theme} label="Acompanhamento Bolsa Família" date={fU.c1_bolsa_familia} onClick={() => setDate("c1_bolsa_familia")} />}
                 </div>
               </FormGroup>
@@ -1424,7 +1424,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
             </div>
           </div>
           <div>
-            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>CNS</label>
+            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>CNS (Cartão SUS)</label>
             <div className="relative">
               <input type="text" className={`w-full border rounded-xl p-3 pr-10 outline-none focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={f.cns} onChange={(e) => setF({ ...f, cns: e.target.value })} placeholder="Apenas números" />
               <VoiceBtn theme={theme} onResult={(t) => handleDictation('cns', t)} />
@@ -1483,7 +1483,7 @@ function PatientForm({ theme, initialData, onSave, onCancel }) {
             </div>
           </div>
           <div>
-            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>Complemento / Referência</label>
+            <label className={`block text-xs font-bold mb-1 ${theme.textSec}`}>Referência / Complemento</label>
             <div className="relative">
               <input type="text" className={`w-full border rounded-xl p-3 pr-10 outline-none focus:ring-2 focus:ring-teal-500 ${theme.input}`} value={f.referencia} onChange={(e) => setF({ ...f, referencia: e.target.value })} placeholder="Ex: Próximo à padaria" />
               <VoiceBtn theme={theme} onResult={(t) => handleDictation('referencia', t)} />
@@ -1768,11 +1768,12 @@ function CheckboxBtn({ label, checked, onClick, block, theme }) {
 }
 
 function CounterBtn({ label, count, onInc, onDec, target, theme }) {
+  const displayCount = count !== undefined && count !== null ? count : 0;
   return (
     <div className={`flex justify-between items-center p-3 rounded-lg border ${theme.card}`}>
       <span className={`text-xs font-bold ${theme.textMain}`}>{label}</span>
       <div className="flex items-center space-x-2">
-        <span className={`text-sm font-black w-8 text-center ${theme.textMain}`}>{Number(count) || 0}/{target}</span>
+        <span className={`text-sm font-black w-8 text-center ${theme.textMain}`}>{displayCount}/{target}</span>
         <div className="flex space-x-1">
           <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDec(); }} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>-</button>
           <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onInc(); }} className={`w-8 h-8 rounded-md flex justify-center items-center font-bold active:scale-95 transition ${theme.isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>+</button>
@@ -1840,10 +1841,10 @@ function GroupCard({ icon, title, count, theme }) {
 
 function NavBtn({ icon, label, active, onClick, badge, theme }) {
   return (
-    <button onClick={onClick} className={`flex flex-col items-center justify-center w-14 py-2 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
-      {badge > 0 ? (<span className={`absolute top-1 right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
+    <button onClick={onClick} className={`flex-1 flex flex-col items-center justify-center py-1 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
+      {badge > 0 ? (<span className={`absolute top-0 right-1/4 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
       {React.cloneElement(icon, { className: `h-6 w-6 mb-1 ${active ? "fill-teal-50 dark:fill-teal-900/30" : ""}` })}
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-[9px] sm:text-[10px] font-bold whitespace-nowrap">{label}</span>
     </button>
   );
 }
