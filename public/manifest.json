@@ -1,0 +1,15 @@
+{
+  "short_name": "ACS 360",
+  "name": "ACS Pro 360 - Gestão APS",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "192x192 512x512",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0d9488",
+  "background_color": "#ffffff"
+}
