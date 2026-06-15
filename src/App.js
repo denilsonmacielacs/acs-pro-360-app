@@ -335,8 +335,32 @@ function getPatientTags(patient, theme) {
   return tags;
 }
 
+// --- MODAL DE GUIA DE INSTALAÇÃO (PWA iOS/Android) ---
+function InstallGuideModal({ theme, onClose }) {
+  return (
+    <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className={`${theme.card} rounded-3xl p-6 w-full max-w-sm animate-in zoom-in-95 shadow-2xl relative text-center`}>
+         <button onClick={onClose} className={`absolute top-4 right-4 p-2 rounded-full ${theme.isDark ? 'bg-slate-800 text-slate-400' : 'bg-gray-100 text-gray-500'}`}><X className="w-4 h-4" /></button>
+         <Download className="w-12 h-12 mx-auto text-teal-600 mb-4" />
+         <h3 className={`font-bold text-lg mb-2 ${theme.textMain}`}>Instalar Aplicativo</h3>
+         <p className={`text-sm mb-4 ${theme.textSec}`}>Para instalar o ACS Pro 360 no seu telemóvel:</p>
+         
+         <div className={`text-left p-4 rounded-xl text-sm mb-4 border ${theme.isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-gray-50 border-gray-100'}`}>
+           <p className={`font-bold mb-1 ${theme.textMain}`}>📱 No Android (Chrome):</p>
+           <p className={`mb-3 ${theme.textSec}`}>Toque nos 3 pontinhos (⋮) no topo direito e escolha <b>"Adicionar à Tela Inicial"</b> ou <b>"Instalar Aplicativo"</b>.</p>
+           
+           <p className={`font-bold mb-1 ${theme.textMain}`}>🍎 No iPhone (Safari):</p>
+           <p className={`${theme.textSec}`}>Toque no ícone de Partilhar (quadrado com seta para cima) na parte inferior da tela e escolha <b>"Adicionar à Tela de Início"</b>.</p>
+         </div>
+         
+         <button onClick={onClose} className="w-full py-3 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 active:scale-95 transition">Entendi</button>
+      </div>
+    </div>
+  );
+}
+
 // --- TELA DE LOGIN ---
-function LoginScreen({ theme, onLogin, error, isLoading, isInstallable, onInstall }) {
+function LoginScreen({ theme, onLogin, error, isLoading, onInstallShow }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -384,8 +408,8 @@ function LoginScreen({ theme, onLogin, error, isLoading, isInstallable, onInstal
           </button>
         </form>
 
-        {isInstallable && (
-          <button type="button" onClick={onInstall} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
+        {onInstallShow && (
+          <button type="button" onClick={onInstallShow} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
             <Download className="w-5 h-5" />
             <span>Instalar Aplicativo no Telemóvel</span>
           </button>
@@ -415,26 +439,31 @@ export default function App() {
   
   // ESTADOS PARA INSTALAÇÃO DO APLICATIVO (PWA)
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isInstallable, setIsInstallable] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   useEffect(() => {
+    // Verifica se já está instalado (rodando como app nativo)
+    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true);
+
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      setIsInstallable(true);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstallable(false);
+    if (deferredPrompt) {
+      // Se o Android permitir a instalação com um clique, usamos isso!
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') setDeferredPrompt(null);
+    } else {
+      // Se for iPhone ou se o Android estiver a bloquear, abrimos o nosso guia amigável!
+      setShowInstallGuide(true);
     }
-    setDeferredPrompt(null);
   };
   
   // Monitora o status de login do Firebase
@@ -443,7 +472,6 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       if (user && user.email) {
-        // Se for o seu email principal, define como master
         const role = user.email.toLowerCase() === MASTER_EMAIL.toLowerCase() ? "master" : "user";
         setLoggedInUser({ email: user.email, role: role, uid: user.uid });
       } else {
@@ -452,6 +480,28 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // --- ESCUTADOR DE SEGURANÇA (A GUILHOTINA DE BLOQUEIO EM TEMPO REAL) ---
+  useEffect(() => {
+    if (!authUser || !db) return;
+    // Se for o MASTER, ignoramos o bloqueio, ele nunca é bloqueado.
+    if (authUser.email && authUser.email.toLowerCase() === MASTER_EMAIL.toLowerCase()) return;
+
+    const userDocRef = doc(db, 'artifacts', appId, 'admin_users', authUser.uid);
+    const unsubscribeAuthCheck = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data();
+        if (userData.active === false) {
+          // O Master apertou o botão de bloquear! Desconecta à força no mesmo milissegundo.
+          signOut(auth).then(() => {
+            setLoginError("⚠️ Acesso suspenso por inadimplência. Contacte o administrador.");
+          });
+        }
+      }
+    });
+
+    return () => unsubscribeAuthCheck();
+  }, [authUser]);
 
   // 3. TODOS OS OUTROS HOOKS (Tema, Banco Local, Pacientes, Tabs)
   const [isDarkMode, setIsDarkMode] = useState(() => safeGetItem('acs_pro_360_theme') === 'dark');
@@ -582,7 +632,7 @@ export default function App() {
       if (err.code === 'auth/unauthorized-domain') {
         setLoginError("⚠️ Domínio bloqueado! Autorize na consola do Firebase.");
       } else {
-        setLoginError("Credenciais inválidas ou e-mail incorreto.");
+        setLoginError("Credenciais inválidas ou acesso suspenso.");
       }
     } finally {
       setIsLoggingIn(false);
@@ -791,7 +841,7 @@ export default function App() {
 
   // 5. TELA DE LOGIN (Mostra se não estiver logado)
   if (!loggedInUser) {
-    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} isInstallable={isInstallable} onInstall={handleInstallClick} />;
+    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} onInstallShow={!isStandalone ? handleInstallClick : null} />;
   }
 
   // 6. USUÁRIO LOGADO NO APLICATIVO
@@ -813,7 +863,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {isInstallable && (
+              {!isStandalone && (
                 <button onClick={handleInstallClick} title="Instalar App" className="bg-white/10 p-2.5 rounded-full text-white hover:bg-white/20 transition shadow-sm animate-bounce">
                   <Download className="w-4 h-4" />
                 </button>
