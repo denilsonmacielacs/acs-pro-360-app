@@ -456,12 +456,12 @@ export default function App() {
 
   const handleInstallClick = async () => {
     if (deferredPrompt) {
-      // Se o Android permitir a instalação com um clique, usamos isso!
+      // Se o Android permitir a instalação automática, usamos isso!
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') setDeferredPrompt(null);
     } else {
-      // Se for iPhone ou se o Android estiver a bloquear, abrimos o nosso guia amigável!
+      // Se for iPhone ou se o Android estiver a bloquear o prompt automático, abrimos o manual!
       setShowInstallGuide(true);
     }
   };
@@ -1072,6 +1072,7 @@ export default function App() {
 
         {selectedPatient && <PatientDetailsModal patient={selectedPatient} theme={theme} onClose={() => setSelectedPatient(null)} onRegisterVisit={handleRegisterVisit} onUpdateData={handleUpdatePatientData} onDelete={handleDeletePatient} />}
         {showProfileModal && <UserProfileModal user={appUser} theme={theme} onClose={() => setShowProfileModal(false)} onLogout={handleLogout} onChangePassword={handleChangePassword} />}
+        {showInstallGuide && <InstallGuideModal theme={theme} onClose={() => setShowInstallGuide(false)} />}
       </div>
     </div>
   );
