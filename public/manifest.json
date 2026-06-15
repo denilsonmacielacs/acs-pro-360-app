@@ -1,15 +1,16 @@
 {
-  "short_name": "ACS 360",
-  "name": "ACS Pro 360 - Gestão APS",
-  "icons": [
-    {
-      "src": "favicon.ico",
-      "sizes": "192x192 512x512",
-      "type": "image/x-icon"
-    }
-  ],
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#0d9488",
-  "background_color": "#ffffff"
+"short_name": "ACS 360",
+"name": "ACS Pro 360 - Gestão APS",
+"icons": [
+{
+"src": "logo512.png",
+"sizes": "512x512",
+"type": "image/png",
+"purpose": "any maskable"
+}
+],
+"start_url": ".",
+"display": "standalone",
+"theme_color": "#0d9488",
+"background_color": "#ffffff"
 }
