@@ -113,7 +113,7 @@ function BrandLogo({ className = "w-8 h-8" }) {
   );
 }
 
-// --- FUNÇÕES DE RECONHECIMENTO DE VOZ (CORRIGIDO BUG DO ECO OFFLINE) ---
+// --- FUNÇÕES DE RECONHECIMENTO DE VOZ (CORRIGIDO CORTE RÁPIDO) ---
 function useVoiceDictation(onResult) {
   const [isListening, setIsListening] = useState(false);
   const [supported] = useState(() => 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
@@ -125,22 +125,27 @@ function useVoiceDictation(onResult) {
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR'; 
-    recognition.interimResults = false; 
+    recognition.interimResults = false; // Queremos apenas o resultado final
     recognition.maxAlternatives = 1;
     
-    // Trava de segurança para impedir múltiplas chamadas (O ECO)
-    let handled = false;
+    let finalTranscript = "";
 
     recognition.onstart = () => setIsListening(true);
+    
+    // Captura o texto que foi ouvido e guarda na variável, mas não envia já
     recognition.onresult = (e) => {
-      if (handled) return;
-      handled = true;
-      const transcript = e.results[0][0].transcript;
-      onResult(transcript);
-      recognition.stop(); // Desliga o microfone imediatamente à força
+      finalTranscript = e.results[0][0].transcript;
     };
+
+    // Só envia o resultado e limpa a variável quando o microfone se desliga por ter acabado de falar
+    recognition.onend = () => {
+        if (finalTranscript !== "") {
+            onResult(finalTranscript);
+        }
+        setIsListening(false);
+    };
+
     recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
     try { recognition.start(); } catch (e) { setIsListening(false); }
   };
   return { isListening, supported, startListening };
@@ -359,8 +364,8 @@ function InstallGuideModal({ theme, onClose }) {
   );
 }
 
-// --- TELA DE LOGIN ---
-function LoginScreen({ theme, onLogin, error, isLoading, isInstallable, onInstall }) {
+// --- TELA DE LOGIN COM AVISO DE SUPORTE ---
+function LoginScreen({ theme, onLogin, error, isLoading, onInstallShow }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -381,6 +386,12 @@ function LoginScreen({ theme, onLogin, error, isLoading, isInstallable, onInstal
         {error && (
           <div className={`mb-4 p-3 border text-sm rounded-xl font-bold text-center ${error.includes('⚠️') ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-red-100 border-red-200 text-red-700'}`}>
             {error}
+            {error.includes("suspenso") && (
+              <p className="mt-2 text-xs opacity-90 font-medium border-t border-red-200 pt-2">
+                Para renovar o acesso,<br/>entre em contato com o suporte:<br/>
+                <b className="text-red-900 block mt-1">suporte@acspro360.com</b>
+              </p>
+            )}
           </div>
         )}
 
@@ -408,8 +419,8 @@ function LoginScreen({ theme, onLogin, error, isLoading, isInstallable, onInstal
           </button>
         </form>
 
-        {isInstallable && (
-          <button type="button" onClick={onInstall} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
+        {onInstallShow && (
+          <button type="button" onClick={onInstallShow} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
             <Download className="w-5 h-5" />
             <span>Instalar Aplicativo no Telemóvel</span>
           </button>
@@ -439,42 +450,59 @@ export default function App() {
   
   // ESTADOS PARA INSTALAÇÃO DO APLICATIVO (PWA)
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isInstallable, setIsInstallable] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   useEffect(() => {
+    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true);
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      setIsInstallable(true);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) {
-      // Se não houver prompt automático (ex: iOS), mostra o guia manual
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') setDeferredPrompt(null);
+    } else {
       setShowInstallGuide(true);
-      return;
     }
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstallable(false);
-    }
-    setDeferredPrompt(null);
   };
   
-  // Monitora o status de login do Firebase
+  // --- MONITOR DE LOGIN SEGURO ---
   useEffect(() => {
     if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       if (user && user.email) {
-        // Se for o seu email principal, define como master
         const role = user.email.toLowerCase() === MASTER_EMAIL.toLowerCase() ? "master" : "user";
-        setLoggedInUser({ email: user.email, role: role, uid: user.uid });
+        
+        // Se for cliente comum, vai ver se ele está ativo antes de carregar o app!
+        if (role !== "master" && db) {
+           const checkAccess = async () => {
+             try {
+               const docSnap = await new Promise((resolve) => {
+                  const unsub = onSnapshot(doc(db, 'artifacts', appId, 'admin_users', user.uid), (snap) => {
+                     unsub(); resolve(snap);
+                  });
+               });
+               if (docSnap.exists() && docSnap.data().active === false) {
+                 await signOut(auth);
+                 safeSetItem("acs_pro_360_block_msg", "⚠️ Acesso suspenso por inadimplência.");
+                 window.location.reload(); // Recarga imediata para a tela de login
+                 return;
+               }
+               setLoggedInUser({ email: user.email, role: role, uid: user.uid });
+             } catch(e) { setLoggedInUser({ email: user.email, role: role, uid: user.uid }); }
+           };
+           checkAccess();
+        } else {
+           setLoggedInUser({ email: user.email, role: role, uid: user.uid });
+        }
       } else {
         setLoggedInUser(null);
       }
@@ -482,33 +510,36 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- NOVA GUILHOTINA: ESCUTADOR DE SEGURANÇA EM TEMPO REAL ---
-  // Este hook fica sempre a vigiar se o Master bloqueou o agente.
+  // --- ESCUTADOR DE GUILHOTINA (MORTE SÚBITA) ---
   useEffect(() => {
-    // Se não há utilizador, não há banco de dados, ou se for o Master (que nunca é bloqueado), não faz nada.
     if (!authUser || !db) return;
     if (authUser.email && authUser.email.toLowerCase() === MASTER_EMAIL.toLowerCase()) return;
 
-    // Vai diretamente ao ficheiro 'admin_users' onde o Master coloca o status (True ou False)
     const userDocRef = doc(db, 'artifacts', appId, 'admin_users', authUser.uid);
-    
-    // Fica a "escutar" alterações nesse documento 24 horas por dia
     const unsubscribeAuthCheck = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const userData = docSnap.data();
-        // Se o Master mudou o botão para Bloqueado (active === false)...
         if (userData.active === false) {
-          // A Guilhotina Cai: Força a saída do utilizador IMEDIATAMENTE e exibe a mensagem vermelha.
+          // O Agente foi bloqueado agora mesmo pelo Master!
           signOut(auth).then(() => {
-            setLoginError("⚠️ Acesso suspenso por inadimplência. Contacte o administrador.");
+            safeSetItem("acs_pro_360_block_msg", "⚠️ Acesso suspenso por inadimplência.");
+            window.location.reload(); // Destroi a memória inteira e recarrega a página forçadamente
           });
         }
       }
     });
 
-    // Desliga a escuta quando o aplicativo é fechado ou o utilizador sai.
     return () => unsubscribeAuthCheck();
   }, [authUser]);
+
+  // Checa se a página foi recarregada por causa da Guilhotina
+  useEffect(() => {
+     const blockMsg = safeGetItem("acs_pro_360_block_msg");
+     if (blockMsg) {
+        setLoginError(blockMsg);
+        safeRemoveItem("acs_pro_360_block_msg");
+     }
+  }, []);
 
   // 3. TODOS OS OUTROS HOOKS (Tema, Banco Local, Pacientes, Tabs)
   const [isDarkMode, setIsDarkMode] = useState(() => safeGetItem('acs_pro_360_theme') === 'dark');
@@ -639,8 +670,7 @@ export default function App() {
       if (err.code === 'auth/unauthorized-domain') {
         setLoginError("⚠️ Domínio bloqueado! Autorize na consola do Firebase.");
       } else {
-        // Se a senha estiver errada ou a conta não existir
-        setLoginError("Credenciais inválidas ou conta inexistente.");
+        setLoginError("Credenciais inválidas ou acesso suspenso.");
       }
     } finally {
       setIsLoggingIn(false);
@@ -849,7 +879,7 @@ export default function App() {
 
   // 5. TELA DE LOGIN (Mostra se não estiver logado)
   if (!loggedInUser) {
-    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} isInstallable={isInstallable} onInstall={handleInstallClick} />;
+    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} onInstallShow={!isStandalone ? handleInstallClick : null} />;
   }
 
   // 6. USUÁRIO LOGADO NO APLICATIVO
@@ -871,7 +901,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {isInstallable && (
+              {!isStandalone && (
                 <button onClick={handleInstallClick} title="Instalar App" className="bg-white/10 p-2.5 rounded-full text-white hover:bg-white/20 transition shadow-sm animate-bounce">
                   <Download className="w-4 h-4" />
                 </button>
