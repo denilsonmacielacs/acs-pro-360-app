@@ -360,7 +360,7 @@ function InstallGuideModal({ theme, onClose }) {
 }
 
 // --- TELA DE LOGIN ---
-function LoginScreen({ theme, onLogin, error, isLoading, onInstallShow }) {
+function LoginScreen({ theme, onLogin, error, isLoading, isInstallable, onInstall }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -408,8 +408,8 @@ function LoginScreen({ theme, onLogin, error, isLoading, onInstallShow }) {
           </button>
         </form>
 
-        {onInstallShow && (
-          <button type="button" onClick={onInstallShow} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
+        {isInstallable && (
+          <button type="button" onClick={onInstall} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
             <Download className="w-5 h-5" />
             <span>Instalar Aplicativo no Telemóvel</span>
           </button>
@@ -439,31 +439,31 @@ export default function App() {
   
   // ESTADOS PARA INSTALAÇÃO DO APLICATIVO (PWA)
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isStandalone, setIsStandalone] = useState(false);
+  const [isInstallable, setIsInstallable] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   useEffect(() => {
-    // Verifica se já está instalado (rodando como app nativo)
-    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true);
-
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      setIsInstallable(true);
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   const handleInstallClick = async () => {
-    if (deferredPrompt) {
-      // Se o Android permitir a instalação automática, usamos isso!
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') setDeferredPrompt(null);
-    } else {
-      // Se for iPhone ou se o Android estiver a bloquear o prompt automático, abrimos o manual!
+    if (!deferredPrompt) {
+      // Se não houver prompt automático (ex: iOS), mostra o guia manual
       setShowInstallGuide(true);
+      return;
     }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstallable(false);
+    }
+    setDeferredPrompt(null);
   };
   
   // Monitora o status de login do Firebase
@@ -472,6 +472,7 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       if (user && user.email) {
+        // Se for o seu email principal, define como master
         const role = user.email.toLowerCase() === MASTER_EMAIL.toLowerCase() ? "master" : "user";
         setLoggedInUser({ email: user.email, role: role, uid: user.uid });
       } else {
@@ -481,18 +482,23 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- ESCUTADOR DE SEGURANÇA (A GUILHOTINA DE BLOQUEIO EM TEMPO REAL) ---
+  // --- NOVA GUILHOTINA: ESCUTADOR DE SEGURANÇA EM TEMPO REAL ---
+  // Este hook fica sempre a vigiar se o Master bloqueou o agente.
   useEffect(() => {
+    // Se não há utilizador, não há banco de dados, ou se for o Master (que nunca é bloqueado), não faz nada.
     if (!authUser || !db) return;
-    // Se for o MASTER, ignoramos o bloqueio, ele nunca é bloqueado.
     if (authUser.email && authUser.email.toLowerCase() === MASTER_EMAIL.toLowerCase()) return;
 
+    // Vai diretamente ao ficheiro 'admin_users' onde o Master coloca o status (True ou False)
     const userDocRef = doc(db, 'artifacts', appId, 'admin_users', authUser.uid);
+    
+    // Fica a "escutar" alterações nesse documento 24 horas por dia
     const unsubscribeAuthCheck = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const userData = docSnap.data();
+        // Se o Master mudou o botão para Bloqueado (active === false)...
         if (userData.active === false) {
-          // O Master apertou o botão de bloquear! Desconecta à força no mesmo milissegundo.
+          // A Guilhotina Cai: Força a saída do utilizador IMEDIATAMENTE e exibe a mensagem vermelha.
           signOut(auth).then(() => {
             setLoginError("⚠️ Acesso suspenso por inadimplência. Contacte o administrador.");
           });
@@ -500,6 +506,7 @@ export default function App() {
       }
     });
 
+    // Desliga a escuta quando o aplicativo é fechado ou o utilizador sai.
     return () => unsubscribeAuthCheck();
   }, [authUser]);
 
@@ -632,7 +639,8 @@ export default function App() {
       if (err.code === 'auth/unauthorized-domain') {
         setLoginError("⚠️ Domínio bloqueado! Autorize na consola do Firebase.");
       } else {
-        setLoginError("Credenciais inválidas ou acesso suspenso.");
+        // Se a senha estiver errada ou a conta não existir
+        setLoginError("Credenciais inválidas ou conta inexistente.");
       }
     } finally {
       setIsLoggingIn(false);
@@ -841,7 +849,7 @@ export default function App() {
 
   // 5. TELA DE LOGIN (Mostra se não estiver logado)
   if (!loggedInUser) {
-    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} onInstallShow={!isStandalone ? handleInstallClick : null} />;
+    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} isInstallable={isInstallable} onInstall={handleInstallClick} />;
   }
 
   // 6. USUÁRIO LOGADO NO APLICATIVO
@@ -863,7 +871,7 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              {!isStandalone && (
+              {isInstallable && (
                 <button onClick={handleInstallClick} title="Instalar App" className="bg-white/10 p-2.5 rounded-full text-white hover:bg-white/20 transition shadow-sm animate-bounce">
                   <Download className="w-4 h-4" />
                 </button>
