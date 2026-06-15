@@ -3,7 +3,7 @@ import {
   Users, BellRing, Search, Home, MapPin, CheckCircle2, AlertCircle, X,
   User, Plus, Check, PieChart, AlertTriangle, Loader2, Sparkles, Bot,
   Pencil, Trash2, Phone, CreditCard, FileText, Printer, Moon, Sun,
-  Settings, KeyRound, Power, ChevronDown, Mic, Notebook, LogOut, CheckSquare
+  Settings, KeyRound, Power, ChevronDown, Mic, Notebook, LogOut, CheckSquare, Download
 } from "lucide-react";
 
 // --- FIREBASE IMPORTS ---
@@ -38,7 +38,7 @@ if (firebaseConfigStr) {
     console.error("Erro ao inicializar Firebase", e);
   }
 } else {
-    // FALLBACK PARA DESENVOLVIMENTO (Substitua pelas suas chaves)
+    // Configurações do seu projeto Real
     const firebaseConfig = {
       apiKey: "AIzaSyDrEkPB1PRlqqZ4vLaSlej6SAU-XeAdDeE",
       authDomain: "acs-pro-360.firebaseapp.com",
@@ -64,6 +64,7 @@ if (firebaseConfigStr) {
     } catch (e) {}
 }
 const appId = "acs-pro-360";
+const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
 
 // --- GEMINI API SETUP ---
 const _keyParts = ["AQ.Ab8RN6If", "dS9K2ewFkn", "uPeDXRsmnxWEu", "b5RH-N8JDu8VyRljxfQ"];
@@ -71,7 +72,7 @@ const apiKey = _keyParts.join("");
 
 const generateAiBriefing = async (prompt, retries = 5, delay = 1000) => {
   if (!apiKey) return "⚠️ Erro: Chave da API Gemini não encontrada.";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, {
@@ -112,7 +113,7 @@ function BrandLogo({ className = "w-8 h-8" }) {
   );
 }
 
-// --- FUNÇÕES DE RECONHECIMENTO DE VOZ ---
+// --- FUNÇÕES DE RECONHECIMENTO DE VOZ (CORRIGIDO BUG DO ECO OFFLINE) ---
 function useVoiceDictation(onResult) {
   const [isListening, setIsListening] = useState(false);
   const [supported] = useState(() => 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
@@ -121,10 +122,23 @@ function useVoiceDictation(onResult) {
     if (isListening) return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
+    
     const recognition = new SpeechRecognition();
-    recognition.lang = 'pt-BR'; recognition.interimResults = false; recognition.maxAlternatives = 1;
+    recognition.lang = 'pt-BR'; 
+    recognition.interimResults = false; 
+    recognition.maxAlternatives = 1;
+    
+    // Trava de segurança para impedir múltiplas chamadas (O ECO)
+    let handled = false;
+
     recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (e) => onResult(e.results[0][0].transcript);
+    recognition.onresult = (e) => {
+      if (handled) return;
+      handled = true;
+      const transcript = e.results[0][0].transcript;
+      onResult(transcript);
+      recognition.stop(); // Desliga o microfone imediatamente à força
+    };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
     try { recognition.start(); } catch (e) { setIsListening(false); }
@@ -149,13 +163,49 @@ function VoiceBtn({ onResult, theme, small }) {
   );
 }
 
+// NOVO: Motor Seguro de Impressão Direta no DOM (À prova de telemóveis)
+const executeMobileSafePrint = (htmlContent, customCss = "") => {
+  const oldContainer = document.getElementById('mobile-print-container');
+  if (oldContainer) document.body.removeChild(oldContainer);
+
+  const printContainer = document.createElement("div");
+  printContainer.id = "mobile-print-container";
+  
+  const baseCss = `
+    @media screen {
+      #mobile-print-container { display: none !important; }
+    }
+    @media print {
+      body > *:not(#mobile-print-container) { display: none !important; }
+      body { margin: 0 !important; padding: 0 !important; background: white !important; }
+      #mobile-print-container { 
+        display: block !important; position: absolute; 
+        top: 0; left: 0; width: 100%; 
+        background: white; color: black; 
+      }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+      ${customCss}
+    }
+  `;
+
+  printContainer.innerHTML = `<style>${baseCss}</style><div class="print-content-wrapper">${htmlContent}</div>`;
+  document.body.appendChild(printContainer);
+
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+      const containerToRemove = document.getElementById('mobile-print-container');
+      if (containerToRemove) document.body.removeChild(containerToRemove);
+    }, 2000);
+  }, 500);
+};
+
 // --- BLINDAGEM DE ARMAZENAMENTO (ANTI-CRASH) ---
 const memoryStorage = {};
 const safeGetItem = (key) => { try { return localStorage.getItem(key); } catch(e) { return memoryStorage[key] || null; } };
 const safeSetItem = (key, val) => { try { localStorage.setItem(key, val); } catch(e) { memoryStorage[key] = val; } };
 const safeRemoveItem = (key) => { try { localStorage.removeItem(key); } catch(e) { delete memoryStorage[key]; } };
 
-// --- FUNÇÕES ÚTEIS BLINDADAS CONTRA DATAS INVÁLIDAS ---
 const getTodayStr = () => new Date().toISOString().split("T")[0];
 
 const parseSafeDate = (dStr) => {
@@ -193,7 +243,6 @@ const getPeriodicStatus = (dateStr, windowMonths) => {
   return elapsedDays >= (windowMonths * 30) - 15 ? "pending" : "done"; 
 };
 
-// --- MOTOR DE INDICADORES ---
 const evaluateIndicators = (p) => {
   const age = getAge(p.birthDate); const ageMonths = getAgeMonths(p.birthDate); const daysAge = getAgeDays(p.birthDate);
   const rules = []; let hasPending = false; const ind = p.indicators || {};
@@ -286,8 +335,32 @@ function getPatientTags(patient, theme) {
   return tags;
 }
 
+// --- MODAL DE GUIA DE INSTALAÇÃO (PWA iOS/Android) ---
+function InstallGuideModal({ theme, onClose }) {
+  return (
+    <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className={`${theme.card} rounded-3xl p-6 w-full max-w-sm animate-in zoom-in-95 shadow-2xl relative text-center`}>
+         <button onClick={onClose} className={`absolute top-4 right-4 p-2 rounded-full ${theme.isDark ? 'bg-slate-800 text-slate-400' : 'bg-gray-100 text-gray-500'}`}><X className="w-4 h-4" /></button>
+         <Download className="w-12 h-12 mx-auto text-teal-600 mb-4" />
+         <h3 className={`font-bold text-lg mb-2 ${theme.textMain}`}>Instalar Aplicativo</h3>
+         <p className={`text-sm mb-4 ${theme.textSec}`}>Para instalar o ACS Pro 360 no seu telemóvel:</p>
+         
+         <div className={`text-left p-4 rounded-xl text-sm mb-4 border ${theme.isDark ? 'bg-slate-800/50 border-slate-700' : 'bg-gray-50 border-gray-100'}`}>
+           <p className={`font-bold mb-1 ${theme.textMain}`}>📱 No Android (Chrome):</p>
+           <p className={`mb-3 ${theme.textSec}`}>Toque nos 3 pontinhos (⋮) no topo direito e escolha <b>"Adicionar à Tela Inicial"</b> ou <b>"Instalar Aplicativo"</b>.</p>
+           
+           <p className={`font-bold mb-1 ${theme.textMain}`}>🍎 No iPhone (Safari):</p>
+           <p className={`${theme.textSec}`}>Toque no ícone de Partilhar (quadrado com seta para cima) na parte inferior da tela e escolha <b>"Adicionar à Tela de Início"</b>.</p>
+         </div>
+         
+         <button onClick={onClose} className="w-full py-3 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 active:scale-95 transition">Entendi</button>
+      </div>
+    </div>
+  );
+}
+
 // --- TELA DE LOGIN ---
-function LoginScreen({ theme, onLogin, error, isLoading }) {
+function LoginScreen({ theme, onLogin, error, isLoading, onInstallShow }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -334,6 +407,13 @@ function LoginScreen({ theme, onLogin, error, isLoading }) {
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Entrar no Sistema"}
           </button>
         </form>
+
+        {onInstallShow && (
+          <button type="button" onClick={onInstallShow} className={`mt-6 w-full flex items-center justify-center space-x-2 p-3 font-bold rounded-xl border transition-colors ${theme.isDark ? 'bg-indigo-900/40 text-indigo-400 border-indigo-800 hover:bg-indigo-900/60' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}>
+            <Download className="w-5 h-5" />
+            <span>Instalar Aplicativo no Telemóvel</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -355,16 +435,44 @@ export default function App() {
   const [loggedInUser, setLoggedInUser] = useState(null);
   const [loginError, setLoginError] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminUsersList, setAdminUsersList] = useState([]);
+  
+  // ESTADOS PARA INSTALAÇÃO DO APLICATIVO (PWA)
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+
+  useEffect(() => {
+    // Verifica se já está instalado (rodando como app nativo)
+    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true);
+
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      // Se o Android permitir a instalação com um clique, usamos isso!
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') setDeferredPrompt(null);
+    } else {
+      // Se for iPhone ou se o Android estiver a bloquear, abrimos o nosso guia amigável!
+      setShowInstallGuide(true);
+    }
+  };
   
   // Monitora o status de login do Firebase
   useEffect(() => {
     if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
-      if (user) {
-        // Se for o seu email principal, define como master
-        const role = user.email === "denilsonmaciel.acs@gmail.com" ? "master" : "user";
+      if (user && user.email) {
+        const role = user.email.toLowerCase() === MASTER_EMAIL.toLowerCase() ? "master" : "user";
         setLoggedInUser({ email: user.email, role: role, uid: user.uid });
       } else {
         setLoggedInUser(null);
@@ -372,6 +480,28 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // --- ESCUTADOR DE SEGURANÇA (A GUILHOTINA DE BLOQUEIO EM TEMPO REAL) ---
+  useEffect(() => {
+    if (!authUser || !db) return;
+    // Se for o MASTER, ignoramos o bloqueio, ele nunca é bloqueado.
+    if (authUser.email && authUser.email.toLowerCase() === MASTER_EMAIL.toLowerCase()) return;
+
+    const userDocRef = doc(db, 'artifacts', appId, 'admin_users', authUser.uid);
+    const unsubscribeAuthCheck = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data();
+        if (userData.active === false) {
+          // O Master apertou o botão de bloquear! Desconecta à força no mesmo milissegundo.
+          signOut(auth).then(() => {
+            setLoginError("⚠️ Acesso suspenso por inadimplência. Contacte o administrador.");
+          });
+        }
+      }
+    });
+
+    return () => unsubscribeAuthCheck();
+  }, [authUser]);
 
   // 3. TODOS OS OUTROS HOOKS (Tema, Banco Local, Pacientes, Tabs)
   const [isDarkMode, setIsDarkMode] = useState(() => safeGetItem('acs_pro_360_theme') === 'dark');
@@ -410,10 +540,10 @@ export default function App() {
 
     // Se for master, escuta a coleção de admins para ver todos os clientes
     let unsubAdmin;
-    if (authUser.email === "denilsonmaciel.acs@gmail.com") {
+    if (authUser.email && authUser.email.toLowerCase() === MASTER_EMAIL.toLowerCase()) {
        const adminQ = collection(db, 'artifacts', appId, 'admin_users');
        unsubAdmin = onSnapshot(adminQ, (snap) => {
-          setAdminUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setAdminUsersList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
        });
     }
 
@@ -498,17 +628,11 @@ export default function App() {
     setLoginError("");
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // Login com sucesso, onAuthStateChanged fará o resto
     } catch (err) {
-      console.error("Erro completo do Firebase no Login:", err);
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
-        setLoginError("Credenciais inválidas ou e-mail incorreto.");
-      } else if (err.code === 'auth/unauthorized-domain') {
-        setLoginError("⚠️ Domínio bloqueado! Vá no painel do Firebase > Authentication > Settings > Authorized Domains e adicione a URL da Vercel.");
-      } else if (err.code === 'auth/too-many-requests') {
-        setLoginError("Muitas tentativas. Sua conta foi temporariamente bloqueada por segurança.");
+      if (err.code === 'auth/unauthorized-domain') {
+        setLoginError("⚠️ Domínio bloqueado! Autorize na consola do Firebase.");
       } else {
-        setLoginError(`Falha no login: ${err.message}`);
+        setLoginError("Credenciais inválidas ou acesso suspenso.");
       }
     } finally {
       setIsLoggingIn(false);
@@ -586,69 +710,46 @@ export default function App() {
     e.stopPropagation();
     const tags = getPatientTags(patient, theme);
     const tagsHtml = tags.length > 0 ? tags.map(t => `<span style="display:inline-block; margin:2px; padding:4px 8px; border-radius:4px; font-size:12px; font-weight:bold; background:#e2e8f0; color:#0f172a;">${t.label}</span>`).join('') : "Nenhuma condição específica registrada.";
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(s => s.outerHTML).join("");
-
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed"; iframe.style.width = "0"; iframe.style.height = "0"; iframe.style.border = "0";
-    document.body.appendChild(iframe);
-    const iframeDoc = iframe.contentWindow.document;
-
     const birthObj = parseSafeDate(patient.birthDate);
     const birthStr = birthObj ? birthObj.toLocaleDateString('pt-BR') : 'Não informada';
 
-    iframeDoc.open();
-    iframeDoc.write(`
-      <!DOCTYPE html><html><head><title>Ficha - ${patient.name}</title>${styles}
-      <style>
-        body { font-family: sans-serif; padding: 30px; color: black; background: white; }
-        .header { border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 20px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;}
-        .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; }
-        h1, h2, h3 { margin: 0 0 10px 0; }
-        p { margin: 5px 0; font-size: 14px; }
-      </style></head><body>
-        <div class="header">
-          <h1>${ubsfName || "UBSF - Unidade Básica de Saúde"}</h1>
-          <p><strong>ACS Responsável:</strong> ${acsName || "Não informado"} | <strong>Microárea:</strong> ${patient.microarea}</p>
+    const content = `
+      <div style="font-family: sans-serif; padding: 20px; color: black; background: white;">
+        <div style="border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 20px;">
+          <h1 style="margin: 0 0 5px 0; font-size: 24px;">${ubsfName || "UBSF - Unidade Básica de Saúde"}</h1>
+          <p style="margin: 0; font-size: 14px;"><strong>ACS Responsável:</strong> ${acsName || "Não informado"} | <strong>Microárea:</strong> ${patient.microarea}</p>
         </div>
-        <h2>Ficha do Assistido: ${patient.name}</h2>
-        <div class="grid">
-          <div class="box">
-            <h3>Dados Pessoais</h3>
-            <p><strong>Idade:</strong> ${getAge(patient.birthDate)} anos (${birthStr})</p>
-            <p><strong>Sexo:</strong> ${patient.sex === 'F' ? 'Feminino' : 'Masculino'}</p>
-            <p><strong>CPF:</strong> ${patient.cpf || '-'}</p>
-            <p><strong>CNS:</strong> ${patient.cns || '-'}</p>
-            <p><strong>Telefone:</strong> ${patient.phone || '-'}</p>
+        <h2 style="margin: 0 0 15px 0; font-size: 20px;">Ficha do Assistido: ${patient.name}</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+          <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+            <h3 style="margin: 0 0 10px 0; font-size: 16px;">Dados Pessoais</h3>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>Idade:</strong> ${getAge(patient.birthDate)} anos (${birthStr})</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>Sexo:</strong> ${patient.sex === 'F' ? 'Feminino' : 'Masculino'}</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>CPF:</strong> ${patient.cpf || '-'}</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>CNS (Cartão SUS):</strong> ${patient.cns || '-'}</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>Telefone:</strong> ${patient.phone || '-'}</p>
           </div>
-          <div class="box">
-            <h3>Endereço</h3>
-            <p><strong>CEP:</strong> ${patient.cep || '-'}</p>
-            <p><strong>Rua:</strong> ${patient.logradouro || '-'} <strong>Nº:</strong> ${patient.numero || 'S/N'}</p>
-            <p><strong>Bairro:</strong> ${patient.bairro || '-'}</p>
-            <p><strong>Referência:</strong> ${patient.referencia || '-'}</p>
+          <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+            <h3 style="margin: 0 0 10px 0; font-size: 16px;">Endereço</h3>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>CEP:</strong> ${patient.cep || '-'}</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>Rua:</strong> ${patient.logradouro || '-'} <strong>Nº:</strong> ${patient.numero || 'S/N'}</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>Bairro:</strong> ${patient.bairro || '-'}</p>
+            <p style="margin: 5px 0; font-size: 14px;"><strong>Referência:</strong> ${patient.referencia || '-'}</p>
           </div>
         </div>
-        <div class="box">
-          <h3>Condições de Saúde e Grupos Automáticos</h3>
+        <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+          <h3 style="margin: 0 0 10px 0; font-size: 16px;">Condições de Saúde e Grupos Automáticos</h3>
           <div>${tagsHtml}</div>
         </div>
-      </body></html>
-    `);
-    iframeDoc.close();
-    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
+      </div>
+    `;
+
+    executeMobileSafePrint(content, `@page { size: A4; margin: 15mm; }`);
   };
 
-  // IMPRESSÃO EM LOTE (BATCH)
   const handlePrintBatch = () => {
     const patientsToPrint = patients.filter(p => selectedForPrint.includes(p.id));
     if (patientsToPrint.length === 0) return;
-
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(s => s.outerHTML).join("");
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed"; iframe.style.width = "0"; iframe.style.height = "0"; iframe.style.border = "0";
-    document.body.appendChild(iframe);
-    const iframeDoc = iframe.contentWindow.document;
 
     let htmlContent = patientsToPrint.map((patient, index) => {
         const tags = getPatientTags(patient, theme);
@@ -657,55 +758,38 @@ export default function App() {
         const birthStr = birthObj ? birthObj.toLocaleDateString('pt-BR') : 'Não informada';
 
         return `
-          <div style="${index > 0 ? 'page-break-before: always;' : ''}">
-            <div class="header">
-              <h1>${ubsfName || "UBSF - Unidade Básica de Saúde"}</h1>
-              <p><strong>ACS Responsável:</strong> ${acsName || "Não informado"} | <strong>Microárea:</strong> ${patient.microarea}</p>
+          <div style="${index > 0 ? 'page-break-before: always;' : ''} font-family: sans-serif; padding: 20px; color: black; background: white;">
+            <div style="border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 20px;">
+              <h1 style="margin: 0 0 5px 0; font-size: 24px;">${ubsfName || "UBSF - Unidade Básica de Saúde"}</h1>
+              <p style="margin: 0; font-size: 14px;"><strong>ACS Responsável:</strong> ${acsName || "Não informado"} | <strong>Microárea:</strong> ${patient.microarea}</p>
             </div>
-            <h2>Ficha do Assistido: ${patient.name}</h2>
-            <div class="grid">
-              <div class="box">
-                <h3>Dados Pessoais</h3>
-                <p><strong>Idade:</strong> ${getAge(patient.birthDate)} anos (${birthStr})</p>
-                <p><strong>Sexo:</strong> ${patient.sex === 'F' ? 'Feminino' : 'Masculino'}</p>
-                <p><strong>CPF:</strong> ${patient.cpf || '-'}</p>
-                <p><strong>CNS:</strong> ${patient.cns || '-'}</p>
-                <p><strong>Telefone:</strong> ${patient.phone || '-'}</p>
+            <h2 style="margin: 0 0 15px 0; font-size: 20px;">Ficha do Assistido: ${patient.name}</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+              <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+                <h3 style="margin: 0 0 10px 0; font-size: 16px;">Dados Pessoais</h3>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Idade:</strong> ${getAge(patient.birthDate)} anos (${birthStr})</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Sexo:</strong> ${patient.sex === 'F' ? 'Feminino' : 'Masculino'}</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>CPF:</strong> ${patient.cpf || '-'}</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>CNS (Cartão SUS):</strong> ${patient.cns || '-'}</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Telefone:</strong> ${patient.phone || '-'}</p>
               </div>
-              <div class="box">
-                <h3>Endereço</h3>
-                <p><strong>CEP:</strong> ${patient.cep || '-'}</p>
-                <p><strong>Rua:</strong> ${patient.logradouro || '-'} <strong>Nº:</strong> ${patient.numero || 'S/N'}</p>
-                <p><strong>Bairro:</strong> ${patient.bairro || '-'}</p>
-                <p><strong>Referência:</strong> ${patient.referencia || '-'}</p>
+              <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+                <h3 style="margin: 0 0 10px 0; font-size: 16px;">Endereço</h3>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>CEP:</strong> ${patient.cep || '-'}</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Rua:</strong> ${patient.logradouro || '-'} <strong>Nº:</strong> ${patient.numero || 'S/N'}</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Bairro:</strong> ${patient.bairro || '-'}</p>
+                <p style="margin: 5px 0; font-size: 14px;"><strong>Referência:</strong> ${patient.referencia || '-'}</p>
               </div>
             </div>
-            <div class="box">
-              <h3>Condições de Saúde e Grupos Automáticos</h3>
+            <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px;">
+              <h3 style="margin: 0 0 10px 0; font-size: 16px;">Condições de Saúde e Grupos Automáticos</h3>
               <div>${tagsHtml}</div>
             </div>
           </div>
         `;
     }).join('');
 
-    iframeDoc.open();
-    iframeDoc.write(`
-      <!DOCTYPE html><html><head><title>Fichas em Lote</title>${styles}
-      <style>
-        body { font-family: sans-serif; padding: 30px; color: black; background: white; }
-        .header { border-bottom: 2px solid black; padding-bottom: 15px; margin-bottom: 20px; }
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;}
-        .box { border: 1px solid #ccc; padding: 15px; border-radius: 8px; }
-        h1, h2, h3 { margin: 0 0 10px 0; }
-        p { margin: 5px 0; font-size: 14px; }
-      </style></head><body>
-        ${htmlContent}
-      </body></html>
-    `);
-    iframeDoc.close();
-    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
-
-    // Fecha o modo de seleção após imprimir
+    executeMobileSafePrint(htmlContent, `@page { size: A4; margin: 15mm; }`);
     setIsSelectionMode(false);
     setSelectedForPrint([]);
   };
@@ -713,44 +797,51 @@ export default function App() {
   const handlePrintReport = () => {
     const contentElement = document.getElementById("report-content");
     if (!contentElement) return;
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map(s => s.outerHTML).join("");
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "fixed"; iframe.style.width = "0"; iframe.style.height = "0"; iframe.style.border = "0";
-    document.body.appendChild(iframe);
-    const iframeDoc = iframe.contentWindow.document;
-    iframeDoc.open();
-    iframeDoc.write(`
-      <!DOCTYPE html><html><head><title>Relatório - ACS Pro 360</title>${styles}
-      <style>
-        @page { size: A4; margin: 10mm; }
-        body { background: white !important; margin: 0; padding: 0; font-family: sans-serif; font-size: 11px; }
-        .print\\:hidden { display: none !important; } .hidden.print\\:flex { display: flex !important; }
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-        #report-content * { color: #000 !important; border-color: #ccc !important; }
-        .bg-emerald-500 { background-color: #10b981 !important; color: white !important; }
-        .bg-purple-500 { background-color: #a855f7 !important; color: white !important; }
-        .bg-red-500 { background-color: #ef4444 !important; color: white !important; }
-        .bg-rose-500 { background-color: #f43f5e !important; color: white !important; }
-        .bg-amber-500 { background-color: #f59e0b !important; color: white !important; }
-        .bg-pink-500 { background-color: #ec4899 !important; color: white !important; }
-        
-        /* Ajustes para encaixar em 1 página A4 */
-        .mb-4 { margin-bottom: 0.5rem !important; }
-        .p-4 { padding: 0.5rem !important; }
-        .text-sm { font-size: 10px !important; }
-        .text-xs { font-size: 9px !important; }
-        h2, h3, h4 { margin: 0 0 5px 0 !important; font-size: 12px !important; }
-        .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem !important; }
-        .border { page-break-inside: avoid; break-inside: avoid; }
-      </style></head><body>${contentElement.innerHTML}</body></html>
-    `);
-    iframeDoc.close();
-    setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch (e) {} setTimeout(() => document.body.removeChild(iframe), 2000); }, 1000);
+
+    // Duplicar a tela de relatório para remover os botões na cópia
+    const clone = contentElement.cloneNode(true);
+    const hiddenInPrint = clone.querySelectorAll('.print\\:hidden');
+    hiddenInPrint.forEach(el => el.remove());
+    
+    const flexInPrint = clone.querySelectorAll('.print\\:flex');
+    flexInPrint.forEach(el => {
+      el.classList.remove('hidden');
+      el.style.display = 'flex';
+    });
+
+    const content = clone.innerHTML;
+    
+    // CSS Super Esmagador para Forçar 1 Página no Mobile
+    const customCss = `
+      @page { size: A4; margin: 5mm; }
+      .print-content-wrapper {
+        transform-origin: top center;
+        transform: scale(0.85);
+        width: 100%;
+        max-height: 297mm;
+        overflow: hidden;
+      }
+      .bg-emerald-500 { background-color: #10b981 !important; color: white !important; }
+      .bg-purple-500 { background-color: #a855f7 !important; color: white !important; }
+      .bg-red-500 { background-color: #ef4444 !important; color: white !important; }
+      .bg-rose-500 { background-color: #f43f5e !important; color: white !important; }
+      .bg-amber-500 { background-color: #f59e0b !important; color: white !important; }
+      .bg-pink-500 { background-color: #ec4899 !important; color: white !important; }
+      .mb-4 { margin-bottom: 0.4rem !important; }
+      .p-4 { padding: 0.4rem !important; }
+      h3 { font-size: 12px !important; margin-bottom: 0.2rem !important; }
+      .text-sm { font-size: 10px !important; }
+      .text-xs { font-size: 9px !important; }
+      .text-[10px] { font-size: 8px !important; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem !important; }
+    `;
+
+    executeMobileSafePrint(content, customCss);
   };
 
   // 5. TELA DE LOGIN (Mostra se não estiver logado)
   if (!loggedInUser) {
-    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} />;
+    return <LoginScreen theme={theme} onLogin={handleLogin} error={loginError} isLoading={isLoggingIn} onInstallShow={!isStandalone ? handleInstallClick : null} />;
   }
 
   // 6. USUÁRIO LOGADO NO APLICATIVO
@@ -771,9 +862,16 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <button onClick={() => setIsDarkMode(!isDarkMode)} className="bg-white/10 p-2.5 rounded-full text-white hover:bg-white/20 transition shadow-sm ml-2">
-              {isDarkMode ? <Sun className="w-4 h-4 text-yellow-300" /> : <Moon className="w-4 h-4" />}
-            </button>
+            <div className="flex items-center space-x-2">
+              {!isStandalone && (
+                <button onClick={handleInstallClick} title="Instalar App" className="bg-white/10 p-2.5 rounded-full text-white hover:bg-white/20 transition shadow-sm animate-bounce">
+                  <Download className="w-4 h-4" />
+                </button>
+              )}
+              <button onClick={() => setIsDarkMode(!isDarkMode)} className="bg-white/10 p-2.5 rounded-full text-white hover:bg-white/20 transition shadow-sm ml-2">
+                {isDarkMode ? <Sun className="w-4 h-4 text-yellow-300" /> : <Moon className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
           
           {currentTab === "list" && (
@@ -821,7 +919,6 @@ export default function App() {
                   <div className="flex justify-between items-center mb-3">
                     <h2 className={`${theme.textMain} font-bold`}>Pacientes ({filteredPatients.length})</h2>
                     <div className="flex space-x-2">
-                      {/* BOTÃO DE SELEÇÃO EM LOTE */}
                       <button 
                         onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedForPrint([]); }} 
                         className={`p-2 rounded-lg transition-colors ${isSelectionMode ? 'bg-teal-600 text-white' : (theme.isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-white text-gray-600 border-gray-200')} border shadow-sm`}
@@ -835,7 +932,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* BARRA DE FILTROS DESLIZANTE */}
                   <div className="flex overflow-x-auto space-x-2 pb-2 mb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     {conditionFilters.map(cond => (
                       <button
@@ -867,7 +963,6 @@ export default function App() {
                     ))
                   )}
 
-                  {/* Botão de Paginação UI */}
                   {filteredPatients.length > page * itemsPerPage && (
                     <button onClick={() => setPage(p => p + 1)} className={`w-full py-3 rounded-xl font-bold flex items-center justify-center transition-colors shadow-sm border ${theme.isDark ? 'bg-slate-800 text-teal-400 border-slate-700 hover:bg-slate-700' : 'bg-white text-teal-600 border-gray-200 hover:bg-gray-50'}`}>
                       <ChevronDown className="w-5 h-5 mr-2" /> Carregar Mais
@@ -977,6 +1072,7 @@ export default function App() {
 
         {selectedPatient && <PatientDetailsModal patient={selectedPatient} theme={theme} onClose={() => setSelectedPatient(null)} onRegisterVisit={handleRegisterVisit} onUpdateData={handleUpdatePatientData} onDelete={handleDeletePatient} />}
         {showProfileModal && <UserProfileModal user={appUser} theme={theme} onClose={() => setShowProfileModal(false)} onLogout={handleLogout} onChangePassword={handleChangePassword} />}
+        {showInstallGuide && <InstallGuideModal theme={theme} onClose={() => setShowInstallGuide(false)} />}
       </div>
     </div>
   );
@@ -1841,10 +1937,10 @@ function GroupCard({ icon, title, count, theme }) {
 
 function NavBtn({ icon, label, active, onClick, badge, theme }) {
   return (
-    <button onClick={onClick} className={`flex-1 flex flex-col items-center justify-center py-1 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
-      {badge > 0 ? (<span className={`absolute top-0 right-1/4 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
+    <button onClick={onClick} className={`flex flex-col items-center justify-center w-14 py-2 relative transition-colors ${active ? "text-teal-600 dark:text-teal-400" : (theme.isDark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600")}`}>
+      {badge > 0 ? (<span className={`absolute top-1 right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 ${theme.isDark ? 'border-slate-950' : 'border-white'}`}>{badge}</span>) : null}
       {React.cloneElement(icon, { className: `h-6 w-6 mb-1 ${active ? "fill-teal-50 dark:fill-teal-900/30" : ""}` })}
-      <span className="text-[9px] sm:text-[10px] font-bold whitespace-nowrap">{label}</span>
+      <span className="text-[10px] font-medium">{label}</span>
     </button>
   );
 }
