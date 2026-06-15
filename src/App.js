@@ -11,7 +11,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, updatePassword } from 'firebase/auth';
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, 
-  initializeFirestore, persistentLocalCache, persistentMultipleTabManager 
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  getDocFromServer // <--- A NOVA VACINA ANTI-CACHE IMPORTADA AQUI
 } from 'firebase/firestore';
 
 // --- FIREBASE SETUP ---
@@ -473,7 +474,7 @@ export default function App() {
     }
   };
   
-  // --- MONITOR DE LOGIN SEGURO ---
+  // --- MONITOR DE LOGIN SEGURO (VACINA ANTI-CACHE) ---
   useEffect(() => {
     if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -481,23 +482,26 @@ export default function App() {
       if (user && user.email) {
         const role = user.email.toLowerCase() === MASTER_EMAIL.toLowerCase() ? "master" : "user";
         
-        // Se for cliente comum, vai ver se ele está ativo antes de carregar o app!
+        // Se for cliente comum, vai ver se ele está ativo na nuvem (ignora cache)
         if (role !== "master" && db) {
            const checkAccess = async () => {
              try {
-               const docSnap = await new Promise((resolve) => {
-                  const unsub = onSnapshot(doc(db, 'artifacts', appId, 'admin_users', user.uid), (snap) => {
-                     unsub(); resolve(snap);
-                  });
-               });
+               const docRef = doc(db, 'artifacts', appId, 'admin_users', user.uid);
+               
+               // A VACINA: getDocFromServer OBRIGA o telemóvel a perguntar à nuvem e não ao cache
+               const docSnap = await getDocFromServer(docRef); 
+               
                if (docSnap.exists() && docSnap.data().active === false) {
                  await signOut(auth);
                  safeSetItem("acs_pro_360_block_msg", "⚠️ Acesso suspenso por inadimplência.");
-                 window.location.reload(); // Recarga imediata para a tela de login
+                 window.location.reload(); // Recarga imediata para limpar fantasmas
                  return;
                }
                setLoggedInUser({ email: user.email, role: role, uid: user.uid });
-             } catch(e) { setLoggedInUser({ email: user.email, role: role, uid: user.uid }); }
+             } catch(e) { 
+               // Se falhar a conexão à internet no momento do login, ele usa a última memória para não prender o ACS offline
+               setLoggedInUser({ email: user.email, role: role, uid: user.uid }); 
+             }
            };
            checkAccess();
         } else {
@@ -510,7 +514,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // --- ESCUTADOR DE GUILHOTINA (MORTE SÚBITA) ---
+  // --- ESCUTADOR DE GUILHOTINA EM TEMPO REAL ---
   useEffect(() => {
     if (!authUser || !db) return;
     if (authUser.email && authUser.email.toLowerCase() === MASTER_EMAIL.toLowerCase()) return;
@@ -523,7 +527,7 @@ export default function App() {
           // O Agente foi bloqueado agora mesmo pelo Master!
           signOut(auth).then(() => {
             safeSetItem("acs_pro_360_block_msg", "⚠️ Acesso suspenso por inadimplência.");
-            window.location.reload(); // Destroi a memória inteira e recarrega a página forçadamente
+            window.location.reload(); // Destrói a memória inteira e recarrega a página forçadamente
           });
         }
       }
@@ -1148,7 +1152,11 @@ function AdminPanel({ theme, db, adminAuth }) {
   };
 
   const handleToggleAccess = async (uid, currentStatus) => {
-    try { await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', uid), { active: !currentStatus }, { merge: true }); } catch(e){}
+    try { 
+      await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', uid), { active: !currentStatus }, { merge: true }); 
+    } catch(e) {
+      alert("Falha na conexão com a Nuvem. O comando não foi enviado.");
+    }
   };
 
   return (
