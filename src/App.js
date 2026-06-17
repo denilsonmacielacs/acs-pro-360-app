@@ -68,12 +68,12 @@ const appId = "acs-pro-360";
 const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
 
 // --- GEMINI API SETUP ---
-const _keyParts = ["AQ.Ab8RN6If", "dS9K2ewFkn", "uPeDXRsmnxWEu", "b5RH-N8JDu8VyRljxfQ"];
-const apiKey = _keyParts.join("");
+// IMPORTANTE: Coloque sua chave real gerada no Google AI Studio aqui (começa com AIzaSy...)
+const apiKey = "AQ.Ab8RN6IfdS9K2ewFknuPeDXRsmnxWEub5RH-N8JDu8VyRljxfQ";
 
 const generateAiBriefing = async (prompt, retries = 5, delay = 1000) => {
-  if (!apiKey) return "⚠️ Erro: Chave da API Gemini não encontrada.";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  if (!apiKey) return "⚠️ Erro: Chave da API Gemini não configurada no código.";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, {
@@ -1234,9 +1234,13 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
 
     try { 
       const result = await generateAiBriefing(prompt);
-      setAiInsight(result); 
+      if (result.includes("⚠️ Erro")) {
+        setAiError(result);
+      } else {
+        setAiInsight(result); 
+      }
     } catch (err) { 
-      setAiError("Falha ao conectar com IA."); 
+      setAiError("Falha na IA. Verifique se a sua chave de API é válida e tente novamente."); 
     } finally { 
       setIsAiLoading(false); 
     }
@@ -1312,12 +1316,20 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
                 )}
               </div>
 
-              {!aiInsight && !isAiLoading && (
+              {!aiInsight && !isAiLoading && !aiError && (
                 <button onClick={fetchAiInsight} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-2xl p-4 font-bold shadow-md flex items-center justify-center hover:opacity-90 transition active:scale-95"><Sparkles className="w-5 h-5 mr-2" /> ✨ Copiloto IA: Preparar Visita</button>
               )}
 
               {isAiLoading && (
                 <div className={`p-4 rounded-2xl flex flex-col items-center justify-center border ${theme.isDark ? 'bg-indigo-900/20 border-indigo-900/50' : 'bg-purple-50 border-purple-200'}`}><Loader2 className="w-6 h-6 animate-spin text-purple-600 mb-2" /><p className={`text-xs font-medium ${theme.isDark ? 'text-indigo-300' : 'text-purple-700'}`}>Gerando dicas...</p></div>
+              )}
+
+              {aiError && (
+                <div className={`p-4 rounded-2xl relative shadow-sm border ${theme.isDark ? 'bg-red-900/20 border-red-900/50' : 'bg-red-50 border-red-200'}`}>
+                   <button onClick={() => setAiError(null)} className={`absolute top-3 right-3 p-1 rounded-full ${theme.isDark ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-500'}`}><X className="w-4 h-4" /></button>
+                   <h4 className={`font-bold flex items-center mb-1 ${theme.isDark ? 'text-red-400' : 'text-red-700'}`}><AlertTriangle className="w-4 h-4 mr-2" /> Erro no Copiloto</h4>
+                   <p className={`text-xs ${theme.isDark ? 'text-red-300' : 'text-red-600'}`}>{aiError}</p>
+                </div>
               )}
 
               {aiInsight && (
