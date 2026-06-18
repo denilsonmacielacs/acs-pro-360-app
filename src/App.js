@@ -12,7 +12,7 @@ import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, on
 import { 
   getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, 
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  getDocFromServer // <--- A NOVA VACINA ANTI-CACHE IMPORTADA AQUI
+  getDocFromServer 
 } from 'firebase/firestore';
 
 // --- FIREBASE SETUP ---
@@ -72,15 +72,18 @@ const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
 const apiKey = "AQ.Ab8RN6IkscBnmS-MMFsaJVjEADQAEvLYFasbWcJyX_Vp0k_2HQ";
 
 const generateAiBriefing = async (prompt, retries = 5, delay = 1000) => {
-  if (!apiKey) return "⚠️ Erro: Chave da API Gemini não configurada no código.";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
   for (let i = 0; i < retries; i++) {
     try {
       const response = await fetch(url, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: "Você é um assistente especialista na Atenção Primária à Saúde (APS) do Brasil. Seu objetivo é ajudar Agentes Comunitários de Saúde (ACS) dando dicas práticas, empáticas e curtas de como abordar pacientes durante visitas domiciliares. Considere sempre o estado físico, social e mental do paciente." }] } }),
       });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+         const errText = await response.text();
+         console.error("Erro detalhado da API Gemini:", errText);
+         throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       return data.candidates?.[0]?.content?.parts?.[0]?.text || "Não foi possível gerar a sugestão no momento.";
     } catch (error) {
@@ -1240,7 +1243,8 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
         setAiInsight(result); 
       }
     } catch (err) { 
-      setAiError("Falha na IA. Verifique se a sua chave de API é válida e tente novamente."); 
+      console.error("Falha ao comunicar com a IA:", err);
+      setAiError("Falha na IA. Verifique se a sua chave de API (AIzaSy...) está correta e válida."); 
     } finally { 
       setIsAiLoading(false); 
     }
