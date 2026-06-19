@@ -69,7 +69,7 @@ const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
 
 // --- GEMINI API SETUP ---
 // IMPORTANTE: Coloque sua chave real gerada no Google AI Studio aqui (começa com AIzaSy...)
-const apiKey = "AQ.Ab8RN6IkscBnmS-MMFsaJVjEADQAEvLYFasbWcJyX_Vp0k_2HQ";
+const apiKey = "AIzaSyDrEkPB1PRlqqZ4vLaSlej6SAU-XeAdDeE";
 
 const generateAiBriefing = async (prompt, retries = 5, delay = 1000) => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
