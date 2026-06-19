@@ -14,6 +14,8 @@ import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   getDocFromServer 
 } from 'firebase/firestore';
+// NOVO: Importação oficial do Vertex AI do próprio Firebase
+import { getVertexAI, getGenerativeModel } from 'firebase/vertexai';
 
 // --- FIREBASE SETUP ---
 let app, adminApp, db, auth, adminAuth;
@@ -67,29 +69,31 @@ if (firebaseConfigStr) {
 const appId = "acs-pro-360";
 const MASTER_EMAIL = "denilsonmaciel.acs@gmail.com";
 
-// --- GEMINI API SETUP ---
-// IMPORTANTE: Coloque sua chave real gerada no Google AI Studio aqui (começa com AIzaSy...)
-const apiKey = "AIzaSyDrEkPB1PRlqqZ4vLaSlej6SAU-XeAdDeE";
+// --- GEMINI API SETUP (Vertex AI for Firebase) ---
+// ADEUS CHAVE DE API MANUAL! Agora usamos o túnel blindado do Firebase.
 
-const generateAiBriefing = async (prompt, retries = 5, delay = 1000) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-  for (let i = 0; i < retries; i++) {
-    try {
-      const response = await fetch(url, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: "Você é um assistente especialista na Atenção Primária à Saúde (APS) do Brasil. Seu objetivo é ajudar Agentes Comunitários de Saúde (ACS) dando dicas práticas, empáticas e curtas de como abordar pacientes durante visitas domiciliares. Considere sempre o estado físico, social e mental do paciente." }] } }),
-      });
-      if (!response.ok) {
-         const errText = await response.text();
-         console.error("Erro detalhado da API Gemini:", errText);
-         throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "Não foi possível gerar a sugestão no momento.";
-    } catch (error) {
-      if (i === retries - 1) throw error;
-      await new Promise(r => setTimeout(r, delay)); delay *= 2;
-    }
+const generateAiBriefing = async (prompt) => {
+  try {
+    if (!app) return "⚠️ Erro: Conexão com o servidor não estabelecida.";
+    
+    // 1. Pega a instância do Vertex AI vinculada e protegida pelo seu Firebase
+    const vertexAI = getVertexAI(app);
+    
+    // 2. Prepara o modelo oficial e estável com as instruções do ACS
+    const model = getGenerativeModel(vertexAI, { 
+      model: "gemini-1.5-flash",
+      systemInstruction: "Você é um assistente especialista na Atenção Primária à Saúde (APS) do Brasil. Seu objetivo é ajudar Agentes Comunitários de Saúde (ACS) dando dicas práticas, empáticas e curtas de como abordar pacientes durante visitas domiciliares. Considere sempre o estado físico, social e mental do paciente."
+    });
+
+    // 3. Pede a geração do conteúdo
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    return response.text();
+    
+  } catch (error) {
+    console.error("Erro no Vertex AI:", error);
+    // Se der erro, avisa o usuário elegantemente
+    return "⚠️ Erro ao conectar com a IA. Certifique-se de ter ativado o 'Vertex AI' no console do Firebase e aguarde uns minutos.";
   }
 };
 
@@ -117,7 +121,7 @@ function BrandLogo({ className = "w-8 h-8" }) {
   );
 }
 
-// --- FUNÇÕES DE RECONHECIMENTO DE VOZ (CORRIGIDO CORTE RÁPIDO) ---
+// --- FUNÇÕES DE RECONHECIMENTO DE VOZ ---
 function useVoiceDictation(onResult) {
   const [isListening, setIsListening] = useState(false);
   const [supported] = useState(() => 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
@@ -129,19 +133,17 @@ function useVoiceDictation(onResult) {
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR'; 
-    recognition.interimResults = false; // Queremos apenas o resultado final
+    recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     
     let finalTranscript = "";
 
     recognition.onstart = () => setIsListening(true);
     
-    // Captura o texto que foi ouvido e guarda na variável, mas não envia já
     recognition.onresult = (e) => {
       finalTranscript = e.results[0][0].transcript;
     };
 
-    // Só envia o resultado e limpa a variável quando o microfone se desliga por ter acabado de falar
     recognition.onend = () => {
         if (finalTranscript !== "") {
             onResult(finalTranscript);
@@ -172,7 +174,7 @@ function VoiceBtn({ onResult, theme, small }) {
   );
 }
 
-// NOVO: Motor Seguro de Impressão Direta no DOM (À prova de telemóveis)
+// NOVO: Motor Seguro de Impressão Direta no DOM
 const executeMobileSafePrint = (htmlContent, customCss = "") => {
   const oldContainer = document.getElementById('mobile-print-container');
   if (oldContainer) document.body.removeChild(oldContainer);
@@ -1155,11 +1157,7 @@ function AdminPanel({ theme, db, adminAuth }) {
   };
 
   const handleToggleAccess = async (uid, currentStatus) => {
-    try { 
-      await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', uid), { active: !currentStatus }, { merge: true }); 
-    } catch(e) {
-      alert("Falha na conexão com a Nuvem. O comando não foi enviado.");
-    }
+    try { await setDoc(doc(db, 'artifacts', 'acs-pro-360', 'admin_users', uid), { active: !currentStatus }, { merge: true }); } catch(e){}
   };
 
   return (
@@ -1244,7 +1242,7 @@ function PatientDetailsModal({ patient, theme, onClose, onRegisterVisit, onUpdat
       }
     } catch (err) { 
       console.error("Falha ao comunicar com a IA:", err);
-      setAiError("Falha na IA. Verifique se a sua chave de API (AIzaSy...) está correta e válida."); 
+      setAiError("Falha na IA. Certifique-se de que ativou o Vertex AI no Console do Firebase."); 
     } finally { 
       setIsAiLoading(false); 
     }
